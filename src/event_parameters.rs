@@ -1,12 +1,12 @@
 //! Event parameters for the FunnelMob SDK.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// A value that can be stored in event parameters.
 ///
 /// Supports strings, integers, floats, and booleans.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ParameterValue {
     /// A string value.

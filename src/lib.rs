@@ -91,6 +91,9 @@ use internal::network_client::NetworkClient;
 use internal::storage::{FileStorage, MemoryStorage};
 use internal::validation::validate_event_name;
 
+#[cfg(feature = "async")]
+use internal::async_network_client::AsyncNetworkClient;
+
 /// Validation functions for event data.
 ///
 /// These functions are used internally by the SDK but are exposed
@@ -114,6 +117,8 @@ pub struct FunnelMob {
     session_id: Uuid,
     queue: Arc<EventQueue>,
     network: NetworkClient,
+    #[cfg(feature = "async")]
+    async_network: AsyncNetworkClient,
     logger: Logger,
     enabled: AtomicBool,
     flush_handle: RwLock<Option<thread::JoinHandle<()>>>,
@@ -169,6 +174,9 @@ impl FunnelMob {
         // Create network client
         let network = NetworkClient::new(&config, Logger::new(config.log_level()));
 
+        #[cfg(feature = "async")]
+        let async_network = AsyncNetworkClient::new(&config, Logger::new(config.log_level()))?;
+
         let shutdown = Arc::new(AtomicBool::new(false));
 
         let sdk = Self {
@@ -177,6 +185,8 @@ impl FunnelMob {
             session_id,
             queue,
             network,
+            #[cfg(feature = "async")]
+            async_network,
             logger,
             enabled: AtomicBool::new(true),
             flush_handle: RwLock::new(None),
@@ -492,6 +502,243 @@ impl FunnelMob {
         }
 
         self.logger.info("FunnelMob SDK shutdown complete");
+    }
+}
+
+// Async methods - only available with the "async" feature
+#[cfg(feature = "async")]
+impl FunnelMob {
+    /// Tracks a simple event asynchronously.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use funnelmob::{FunnelMob, Configuration};
+    /// # async fn example() {
+    /// # let config = Configuration::builder("app", "key").build().unwrap();
+    /// # let sdk = FunnelMob::new(config).unwrap();
+    /// sdk.track_event_async("button_click").await.unwrap();
+    /// # }
+    /// ```
+    pub async fn track_event_async(&self, event_name: &str) -> Result<(), FunnelMobError> {
+        if !self.is_enabled() {
+            return Ok(());
+        }
+
+        validate_event_name(event_name)?;
+
+        let event = Event::new(event_name);
+        self.queue.enqueue(event)?;
+
+        self.logger
+            .debug(&format!("Tracked event (async): {}", event_name));
+        Ok(())
+    }
+
+    /// Tracks an event with associated revenue asynchronously.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use funnelmob::{FunnelMob, Configuration, Revenue};
+    /// # async fn example() {
+    /// # let config = Configuration::builder("app", "key").build().unwrap();
+    /// # let sdk = FunnelMob::new(config).unwrap();
+    /// sdk.track_event_with_revenue_async("purchase", Revenue::usd(29.99).unwrap()).await.unwrap();
+    /// # }
+    /// ```
+    pub async fn track_event_with_revenue_async(
+        &self,
+        event_name: &str,
+        revenue: Revenue,
+    ) -> Result<(), FunnelMobError> {
+        if !self.is_enabled() {
+            return Ok(());
+        }
+
+        validate_event_name(event_name)?;
+
+        let event = Event::with_revenue(event_name, &revenue);
+        self.queue.enqueue(event)?;
+
+        self.logger.debug(&format!(
+            "Tracked event (async): {} with revenue {} {}",
+            event_name,
+            revenue.amount_string(),
+            revenue.currency()
+        ));
+        Ok(())
+    }
+
+    /// Tracks an event with custom parameters asynchronously.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use funnelmob::{FunnelMob, Configuration, EventParameters};
+    /// # async fn example() {
+    /// # let config = Configuration::builder("app", "key").build().unwrap();
+    /// # let sdk = FunnelMob::new(config).unwrap();
+    /// sdk.track_event_with_params_async(
+    ///     "signup",
+    ///     EventParameters::new()
+    ///         .set("plan", "premium")
+    ///         .set("trial", true)
+    /// ).await.unwrap();
+    /// # }
+    /// ```
+    pub async fn track_event_with_params_async(
+        &self,
+        event_name: &str,
+        params: EventParameters,
+    ) -> Result<(), FunnelMobError> {
+        if !self.is_enabled() {
+            return Ok(());
+        }
+
+        validate_event_name(event_name)?;
+
+        let event = if let Some(map) = params.into_map() {
+            Event::with_parameters(event_name, map)
+        } else {
+            Event::new(event_name)
+        };
+
+        self.queue.enqueue(event)?;
+
+        self.logger
+            .debug(&format!("Tracked event (async): {} with params", event_name));
+        Ok(())
+    }
+
+    /// Tracks an event with both revenue and custom parameters asynchronously.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use funnelmob::{FunnelMob, Configuration, Revenue, EventParameters};
+    /// # async fn example() {
+    /// # let config = Configuration::builder("app", "key").build().unwrap();
+    /// # let sdk = FunnelMob::new(config).unwrap();
+    /// sdk.track_event_with_revenue_and_params_async(
+    ///     "purchase",
+    ///     Revenue::usd(29.99).unwrap(),
+    ///     EventParameters::new().set("item_id", "sku_123")
+    /// ).await.unwrap();
+    /// # }
+    /// ```
+    pub async fn track_event_with_revenue_and_params_async(
+        &self,
+        event_name: &str,
+        revenue: Revenue,
+        params: EventParameters,
+    ) -> Result<(), FunnelMobError> {
+        if !self.is_enabled() {
+            return Ok(());
+        }
+
+        validate_event_name(event_name)?;
+
+        let event = if let Some(map) = params.into_map() {
+            Event::with_revenue_and_parameters(event_name, &revenue, map)
+        } else {
+            Event::with_revenue(event_name, &revenue)
+        };
+
+        self.queue.enqueue(event)?;
+
+        self.logger.debug(&format!(
+            "Tracked event (async): {} with revenue and params",
+            event_name
+        ));
+        Ok(())
+    }
+
+    /// Flushes queued events to the server asynchronously.
+    ///
+    /// This is the async version of [`FunnelMob::flush`].
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use funnelmob::{FunnelMob, Configuration};
+    /// # async fn example() {
+    /// # let config = Configuration::builder("app", "key").build().unwrap();
+    /// # let sdk = FunnelMob::new(config).unwrap();
+    /// sdk.track_event("important_event").unwrap();
+    /// sdk.flush_async().await.unwrap(); // Send immediately
+    /// # }
+    /// ```
+    pub async fn flush_async(&self) -> Result<(), FunnelMobError> {
+        if !self.is_enabled() {
+            return Ok(());
+        }
+
+        let batch_size = self.config.max_batch_size() as usize;
+        let events = self.queue.take(batch_size)?;
+
+        if events.is_empty() {
+            self.logger.debug("No events to flush (async)");
+            return Ok(());
+        }
+
+        self.logger
+            .info(&format!("Flushing {} events (async)", events.len()));
+
+        let event_ids: Vec<_> = events.iter().map(|e| e.event_id).collect();
+
+        let batch = EventBatch::new(
+            self.config.app_id(),
+            &self.device_info.device_id,
+            events.clone(),
+        )
+        .with_session_id(self.session_id);
+
+        match self.async_network.send_events(&batch).await {
+            Ok(response) => {
+                self.logger.info(&format!(
+                    "Flush complete (async): {} accepted, {} rejected",
+                    response.accepted, response.rejected
+                ));
+
+                // Remove successfully sent events from storage
+                self.queue.confirm_sent(&event_ids)?;
+
+                if !response.errors.is_empty() {
+                    for error in &response.errors {
+                        self.logger.warn(&format!(
+                            "Event {} rejected: {} - {}",
+                            error.event_id, error.code, error.message
+                        ));
+                    }
+                }
+
+                Ok(())
+            }
+            Err(e) => {
+                self.logger
+                    .error(&format!("Flush failed (async), re-queuing events: {}", e));
+                // Re-queue failed events
+                self.queue.requeue(events)?;
+                Err(e)
+            }
+        }
+    }
+
+    /// Shuts down the SDK and flushes any remaining events asynchronously.
+    ///
+    /// This is the async version of [`FunnelMob::destroy`].
+    pub async fn destroy_async(&self) {
+        self.logger.info("Shutting down FunnelMob SDK (async)");
+        self.shutdown.store(true, Ordering::SeqCst);
+
+        // Try to flush remaining events
+        if let Err(e) = self.flush_async().await {
+            self.logger
+                .warn(&format!("Failed to flush during async shutdown: {}", e));
+        }
+
+        self.logger.info("FunnelMob SDK async shutdown complete");
     }
 }
 

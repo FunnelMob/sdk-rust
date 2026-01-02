@@ -9,3 +9,6 @@ pub(crate) mod logger;
 pub(crate) mod network_client;
 pub(crate) mod storage;
 pub(crate) mod validation;
+
+#[cfg(feature = "async")]
+pub(crate) mod async_network_client;

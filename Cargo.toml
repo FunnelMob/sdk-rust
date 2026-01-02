@@ -8,6 +8,10 @@ repository = "https://github.com/funnelmob/sdk-rust"
 keywords = ["analytics", "attribution", "mobile", "mmp"]
 categories = ["development-tools"]
 
+[features]
+default = []
+async = ["tokio", "reqwest"]
+
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -20,5 +24,10 @@ dirs = "5.0"
 ureq = { version = "2.9", features = ["json"] }
 log = "0.4"
 
+# Async support (optional)
+tokio = { version = "1.35", features = ["rt-multi-thread", "time", "sync"], optional = true }
+reqwest = { version = "0.11", features = ["json"], optional = true }
+
 [dev-dependencies]
 tempfile = "3.10"
+tokio = { version = "1.35", features = ["rt-multi-thread", "macros"] }

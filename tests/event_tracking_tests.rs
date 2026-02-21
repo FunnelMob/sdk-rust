@@ -4,12 +4,13 @@
 
 use funnelmob::{
     validation::{validate_currency, validate_event_name},
-    EventParameters, FunnelMob, Configuration, Environment, LogLevel, Revenue,
+    EventParameters, FunnelMob, Configuration, LogLevel, Revenue,
 };
 
 fn test_sdk() -> FunnelMob {
-    let config = Configuration::builder("com.test.integration", "test_key")
-        .environment(Environment::Sandbox)
+    let config = Configuration::builder("test_key")
+        .server("http://localhost:3080/v1")
+        .platform("web")
         .log_level(LogLevel::None)
         .build()
         .unwrap();
@@ -116,7 +117,6 @@ fn test_invalid_event_name_too_long() {
 
 #[test]
 fn test_currency_lowercase_normalized() {
-    // Revenue::new normalizes currency to uppercase
     let revenue = Revenue::new(10.00, "usd").unwrap();
     assert_eq!(revenue.currency(), "USD");
 }
@@ -165,7 +165,6 @@ fn test_revenue_large_amount() {
 
 #[test]
 fn test_revenue_amount_formatting() {
-    // Amount should be formatted with exactly 2 decimal places
     let revenue = Revenue::usd(29.90).unwrap();
     assert_eq!(revenue.amount_string(), "29.90");
 
@@ -205,18 +204,16 @@ fn test_event_name_validation_patterns() {
 
 #[test]
 fn test_currency_validation_patterns() {
-    // Valid patterns (must be uppercase after normalization)
     assert!(validate_currency("USD").is_ok());
     assert!(validate_currency("EUR").is_ok());
     assert!(validate_currency("GBP").is_ok());
     assert!(validate_currency("JPY").is_ok());
 
-    // Invalid patterns
-    assert!(validate_currency("usd").is_err()); // lowercase
-    assert!(validate_currency("US").is_err()); // too short
-    assert!(validate_currency("USDD").is_err()); // too long
-    assert!(validate_currency("DOLLAR").is_err()); // too long
-    assert!(validate_currency("").is_err()); // empty
+    assert!(validate_currency("usd").is_err());
+    assert!(validate_currency("US").is_err());
+    assert!(validate_currency("USDD").is_err());
+    assert!(validate_currency("DOLLAR").is_err());
+    assert!(validate_currency("").is_err());
 }
 
 // ============================================================================
@@ -227,17 +224,13 @@ fn test_currency_validation_patterns() {
 fn test_sdk_enabled_disabled() {
     let sdk = test_sdk();
 
-    // SDK starts enabled
     assert!(sdk.is_enabled());
 
-    // Disable SDK
     sdk.set_enabled(false);
     assert!(!sdk.is_enabled());
 
-    // Tracking should succeed silently when disabled
     assert!(sdk.track_event("test").is_ok());
 
-    // Re-enable SDK
     sdk.set_enabled(true);
     assert!(sdk.is_enabled());
 }
@@ -246,10 +239,8 @@ fn test_sdk_enabled_disabled() {
 fn test_sdk_session_and_device_id() {
     let sdk = test_sdk();
 
-    // Session ID should be a valid UUID v4
     let session_id = sdk.session_id();
     assert_eq!(session_id.get_version_num(), 4);
 
-    // Device ID should not be empty
     assert!(!sdk.device_id().is_empty());
 }

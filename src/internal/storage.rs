@@ -20,9 +20,11 @@ pub trait EventStorage: Send + Sync {
     fn remove(&self, event_ids: &[uuid::Uuid]) -> Result<(), FunnelMobError>;
 
     /// Clears all events from storage.
+    #[allow(dead_code)]
     fn clear(&self) -> Result<(), FunnelMobError>;
 
     /// Returns the number of stored events.
+    #[allow(dead_code)]
     fn count(&self) -> Result<usize, FunnelMobError>;
 }
 
@@ -109,21 +111,21 @@ impl FileStorage {
 
     /// Creates a file storage in the default data directory.
     ///
-    /// On Linux: `~/.local/share/funnelmob/events.jsonl`
-    /// On macOS: `~/Library/Application Support/funnelmob/events.jsonl`
-    /// On Windows: `%APPDATA%\funnelmob\events.jsonl`
-    pub fn default_path(app_id: &str) -> Result<PathBuf, FunnelMobError> {
+    /// On Linux: `~/.local/share/funnelmob/{storage_id}/events.jsonl`
+    /// On macOS: `~/Library/Application Support/funnelmob/{storage_id}/events.jsonl`
+    /// On Windows: `%APPDATA%\funnelmob\{storage_id}\events.jsonl`
+    pub fn default_path(storage_id: &str) -> Result<PathBuf, FunnelMobError> {
         let data_dir = dirs::data_dir().ok_or_else(|| {
             FunnelMobError::Configuration("Could not determine data directory".to_string())
         })?;
 
-        // Sanitize app_id for use in path
-        let safe_app_id: String = app_id
+        // Sanitize storage_id for use in path
+        let safe_id: String = storage_id
             .chars()
             .map(|c| if c.is_alphanumeric() || c == '.' || c == '_' { c } else { '_' })
             .collect();
 
-        Ok(data_dir.join("funnelmob").join(safe_app_id).join("events.jsonl"))
+        Ok(data_dir.join("funnelmob").join(safe_id).join("events.jsonl"))
     }
 }
 
@@ -409,8 +411,8 @@ mod tests {
 
     #[test]
     fn test_default_path() {
-        let path = FileStorage::default_path("com.example.app").unwrap();
+        let path = FileStorage::default_path("ij123456").unwrap();
         assert!(path.to_string_lossy().contains("funnelmob"));
-        assert!(path.to_string_lossy().contains("com.example.app"));
+        assert!(path.to_string_lossy().contains("ij123456"));
     }
 }

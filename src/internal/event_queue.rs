@@ -131,6 +131,7 @@ impl EventQueue {
     }
 
     /// Returns the number of events in the queue.
+    #[allow(dead_code)]
     pub fn len(&self) -> Result<usize, FunnelMobError> {
         let events = self.events.read().map_err(|e| {
             FunnelMobError::Configuration(format!("Failed to lock queue: {}", e))
@@ -139,11 +140,13 @@ impl EventQueue {
     }
 
     /// Returns true if the queue is empty.
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> Result<bool, FunnelMobError> {
         Ok(self.len()? == 0)
     }
 
     /// Clears all events from the queue and storage.
+    #[allow(dead_code)]
     pub fn clear(&self) -> Result<(), FunnelMobError> {
         let mut events = self.events.write().map_err(|e| {
             FunnelMobError::Configuration(format!("Failed to lock queue: {}", e))
@@ -158,6 +161,7 @@ impl EventQueue {
     }
 
     /// Peeks at up to `count` events without removing them.
+    #[allow(dead_code)]
     pub fn peek(&self, count: usize) -> Result<Vec<Event>, FunnelMobError> {
         let events = self.events.read().map_err(|e| {
             FunnelMobError::Configuration(format!("Failed to lock queue: {}", e))

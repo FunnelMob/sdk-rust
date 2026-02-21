@@ -39,7 +39,7 @@ pub struct EventError {
 /// Session registration request.
 #[derive(Debug, Clone, Serialize)]
 pub struct SessionRequest {
-    pub app_id: String,
+    pub platform: String,
     pub device_id: String,
     pub session_id: String,
     pub timestamp: String,
@@ -86,7 +86,7 @@ impl NetworkClient {
     /// Creates a new network client from configuration.
     pub fn new(config: &Configuration, logger: Logger) -> Self {
         Self {
-            base_url: config.base_url().to_string(),
+            base_url: config.server().to_string(),
             api_key: config.api_key().to_string(),
             logger,
             max_retries: 3,
@@ -290,7 +290,7 @@ mod tests {
 
     #[test]
     fn test_calculate_backoff() {
-        let config = Configuration::builder("app", "key").build().unwrap();
+        let config = Configuration::builder("key").build().unwrap();
         let client = NetworkClient::new(&config, Logger::default());
 
         // First retry should be ~1000ms (base delay)
@@ -308,7 +308,7 @@ mod tests {
 
     #[test]
     fn test_backoff_cap() {
-        let config = Configuration::builder("app", "key").build().unwrap();
+        let config = Configuration::builder("key").build().unwrap();
         let client = NetworkClient::new(&config, Logger::default());
 
         // Very high attempt should be capped at 30 seconds

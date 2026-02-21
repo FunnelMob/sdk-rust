@@ -51,6 +51,17 @@ impl Event {
         }
     }
 
+    /// Creates a new event with the given name and a custom timestamp.
+    pub fn with_timestamp(event_name: impl Into<String>, timestamp: DateTime<Utc>) -> Self {
+        Self {
+            event_id: Uuid::new_v4(),
+            event_name: event_name.into(),
+            timestamp,
+            revenue: None,
+            parameters: None,
+        }
+    }
+
     /// Creates a new event with the given name and revenue.
     pub fn with_revenue(event_name: impl Into<String>, revenue: &Revenue) -> Self {
         Self {
@@ -98,6 +109,28 @@ impl Event {
             },
         }
     }
+
+    /// Sets a custom timestamp on this event (builder pattern).
+    pub fn at(mut self, timestamp: DateTime<Utc>) -> Self {
+        self.timestamp = timestamp;
+        self
+    }
+
+    /// Sets revenue on this event (builder pattern).
+    pub fn with_rev(mut self, revenue: &Revenue) -> Self {
+        self.revenue = Some(EventRevenue::from(revenue));
+        self
+    }
+
+    /// Sets parameters on this event (builder pattern).
+    pub fn with_params(mut self, parameters: HashMap<String, ParameterValue>) -> Self {
+        self.parameters = if parameters.is_empty() {
+            None
+        } else {
+            Some(parameters)
+        };
+        self
+    }
 }
 
 impl From<&Revenue> for EventRevenue {
@@ -112,8 +145,8 @@ impl From<&Revenue> for EventRevenue {
 /// Batch of events to send to the API.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventBatch {
-    /// Application identifier.
-    pub app_id: String,
+    /// Platform identifier (e.g., "ios", "android", "web").
+    pub platform: String,
 
     /// Device identifier.
     pub device_id: String,
@@ -128,9 +161,9 @@ pub struct EventBatch {
 
 impl EventBatch {
     /// Creates a new event batch.
-    pub fn new(app_id: impl Into<String>, device_id: impl Into<String>, events: Vec<Event>) -> Self {
+    pub fn new(platform: impl Into<String>, device_id: impl Into<String>, events: Vec<Event>) -> Self {
         Self {
-            app_id: app_id.into(),
+            platform: platform.into(),
             device_id: device_id.into(),
             session_id: None,
             events,
@@ -145,7 +178,9 @@ impl EventBatch {
 }
 
 /// Custom serializer for timestamps to ensure millisecond precision with Z suffix.
+/// Use with `#[serde(with = "timestamp_format")]` on DateTime<Utc> fields.
 pub mod timestamp_format {
+    #![allow(dead_code)]
     use chrono::{DateTime, Utc};
     use serde::{self, Deserialize, Deserializer, Serializer};
 
@@ -182,7 +217,6 @@ mod tests {
         assert_eq!(event.event_name, "purchase");
         assert!(event.revenue.is_none());
         assert!(event.parameters.is_none());
-        // UUID should be valid v4
         assert_eq!(event.event_id.get_version_num(), 4);
     }
 
@@ -216,8 +250,25 @@ mod tests {
         let params = HashMap::new();
         let event = Event::with_parameters("signup", params);
 
-        // Empty parameters should be None
         assert!(event.parameters.is_none());
+    }
+
+    #[test]
+    fn test_event_with_custom_timestamp() {
+        use chrono::TimeZone;
+        let ts = Utc.with_ymd_and_hms(2025, 6, 15, 12, 0, 0).unwrap();
+        let event = Event::with_timestamp("test", ts);
+        assert_eq!(event.timestamp, ts);
+    }
+
+    #[test]
+    fn test_event_builder_pattern() {
+        use chrono::TimeZone;
+        let ts = Utc.with_ymd_and_hms(2025, 6, 15, 12, 0, 0).unwrap();
+        let revenue = Revenue::usd(9.99).unwrap();
+        let event = Event::new("purchase").at(ts).with_rev(&revenue);
+        assert_eq!(event.timestamp, ts);
+        assert!(event.revenue.is_some());
     }
 
     #[test]
@@ -225,7 +276,6 @@ mod tests {
         let event = Event::new("purchase");
         let json = serde_json::to_string(&event).unwrap();
 
-        // Should not contain null revenue or parameters
         assert!(!json.contains("revenue"));
         assert!(!json.contains("parameters"));
         assert!(json.contains("event_id"));
@@ -246,13 +296,12 @@ mod tests {
     #[test]
     fn test_event_batch_serialization() {
         let events = vec![Event::new("test")];
-        let batch = EventBatch::new("com.example.app", "device-123", events);
+        let batch = EventBatch::new("web", "device-123", events);
         let json = serde_json::to_string(&batch).unwrap();
 
-        assert!(json.contains("\"app_id\":\"com.example.app\""));
+        assert!(json.contains("\"platform\":\"web\""));
         assert!(json.contains("\"device_id\":\"device-123\""));
         assert!(json.contains("events"));
-        // session_id should be omitted when None
         assert!(!json.contains("session_id"));
     }
 
@@ -260,7 +309,7 @@ mod tests {
     fn test_event_batch_with_session() {
         let events = vec![Event::new("test")];
         let session_id = Uuid::new_v4();
-        let batch = EventBatch::new("com.example.app", "device-123", events)
+        let batch = EventBatch::new("ios", "device-123", events)
             .with_session_id(session_id);
         let json = serde_json::to_string(&batch).unwrap();
 
@@ -289,8 +338,6 @@ mod tests {
         let event = Event::new("test");
         let json = serde_json::to_string(&event).unwrap();
 
-        // Should contain timestamp in ISO 8601 format with Z suffix
-        // The default chrono serialization includes timezone info
         assert!(json.contains("timestamp"));
     }
 }

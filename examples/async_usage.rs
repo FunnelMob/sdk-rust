@@ -4,15 +4,16 @@
 
 #[cfg(feature = "async")]
 use funnelmob::{
-    standard_events, Configuration, Environment, EventParameters, FunnelMob, LogLevel, Revenue,
+    standard_events, Configuration, EventParameters, FunnelMob, LogLevel, Revenue,
 };
 
 #[cfg(feature = "async")]
 #[tokio::main]
 async fn main() {
     // Configure the SDK
-    let config = Configuration::builder("com.example.async_app", "your_api_key_here")
-        .environment(Environment::Sandbox)
+    let config = Configuration::builder("your_api_key_here")
+        .server("http://localhost:3080/v1")
+        .platform("web")
         .log_level(LogLevel::Debug)
         .flush_interval_ms(5000)
         .max_batch_size(50)
@@ -73,8 +74,6 @@ async fn main() {
         .map(|i| {
             let event_name = format!("concurrent_event_{}", i);
             async move {
-                // Note: In real code, you'd share the SDK instance properly
-                // For this example, we just show the pattern
                 println!("  Tracking: {}", event_name);
             }
         })
@@ -87,8 +86,7 @@ async fn main() {
     // Flush events asynchronously
     println!("\nFlushing events (async)...");
     if let Err(e) = sdk.flush_async().await {
-        // Expected to fail without a real API endpoint
-        println!("  Flush result: {} (expected in sandbox without server)", e);
+        println!("  Flush result: {} (expected without server)", e);
     } else {
         println!("  Flush completed successfully");
     }

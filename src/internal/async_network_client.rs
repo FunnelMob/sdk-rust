@@ -33,7 +33,7 @@ impl AsyncNetworkClient {
 
         Ok(Self {
             client,
-            base_url: config.base_url().to_string(),
+            base_url: config.server().to_string(),
             api_key: config.api_key().to_string(),
             logger,
             max_retries: 3,

@@ -35,8 +35,11 @@ impl DeviceInfo {
     ///
     /// The device_id is stored in a file for persistence across sessions.
     /// If the file doesn't exist, a new UUID is generated and stored.
-    pub fn collect(app_id: &str) -> Result<Self, FunnelMobError> {
-        let device_id = Self::get_or_create_device_id(app_id)?;
+    ///
+    /// `storage_id` is a filesystem-safe identifier used to namespace the
+    /// device_id storage (derived from the API key).
+    pub fn collect(storage_id: &str) -> Result<Self, FunnelMobError> {
+        let device_id = Self::get_or_create_device_id(storage_id)?;
 
         Ok(Self {
             device_id,
@@ -49,8 +52,8 @@ impl DeviceInfo {
     }
 
     /// Gets the stored device ID or creates a new one.
-    fn get_or_create_device_id(app_id: &str) -> Result<String, FunnelMobError> {
-        let path = Self::device_id_path(app_id)?;
+    fn get_or_create_device_id(storage_id: &str) -> Result<String, FunnelMobError> {
+        let path = Self::device_id_path(storage_id)?;
 
         // Try to read existing device ID
         if path.exists() {
@@ -84,13 +87,13 @@ impl DeviceInfo {
     }
 
     /// Returns the path where the device ID is stored.
-    fn device_id_path(app_id: &str) -> Result<PathBuf, FunnelMobError> {
+    fn device_id_path(storage_id: &str) -> Result<PathBuf, FunnelMobError> {
         let data_dir = dirs::data_dir().ok_or_else(|| {
             FunnelMobError::Configuration("Could not determine data directory".to_string())
         })?;
 
-        // Sanitize app_id for use in path
-        let safe_app_id: String = app_id
+        // Sanitize storage_id for use in path
+        let safe_id: String = storage_id
             .chars()
             .map(|c| {
                 if c.is_alphanumeric() || c == '.' || c == '_' {
@@ -103,7 +106,7 @@ impl DeviceInfo {
 
         Ok(data_dir
             .join("funnelmob")
-            .join(safe_app_id)
+            .join(safe_id)
             .join("device_id"))
     }
 
@@ -129,7 +132,6 @@ impl DeviceInfo {
 
     /// Gets the operating system version.
     fn get_os_version() -> String {
-        // Try to get OS version from various sources
         #[cfg(target_os = "linux")]
         {
             Self::get_linux_version()
@@ -150,7 +152,6 @@ impl DeviceInfo {
 
     #[cfg(target_os = "linux")]
     fn get_linux_version() -> String {
-        // Try /etc/os-release first
         if let Ok(content) = fs::read_to_string("/etc/os-release") {
             for line in content.lines() {
                 if line.starts_with("VERSION_ID=") {
@@ -162,7 +163,6 @@ impl DeviceInfo {
             }
         }
 
-        // Fallback to uname
         std::process::Command::new("uname")
             .arg("-r")
             .output()
@@ -185,8 +185,7 @@ impl DeviceInfo {
 
     #[cfg(target_os = "windows")]
     fn get_windows_version() -> String {
-        // Try to get Windows version from registry or systeminfo
-        "10".to_string() // Simplified for now
+        "10".to_string()
     }
 
     /// Gets the system hostname.
@@ -215,7 +214,6 @@ impl DeviceInfo {
             .or_else(|_| std::env::var("LC_ALL"))
             .ok()
             .map(|l| {
-                // Parse locale like "en_US.UTF-8" to "en_US"
                 l.split('.')
                     .next()
                     .unwrap_or(&l)
@@ -226,7 +224,6 @@ impl DeviceInfo {
     /// Gets the system timezone.
     fn get_timezone() -> Option<String> {
         std::env::var("TZ").ok().or_else(|| {
-            // Try to read from /etc/timezone on Linux
             #[cfg(target_os = "linux")]
             {
                 fs::read_to_string("/etc/timezone")
@@ -250,7 +247,6 @@ mod tests {
     fn test_os_name() {
         let os_name = DeviceInfo::get_os_name();
         assert!(!os_name.is_empty());
-        // Should be one of the known values
         assert!(
             os_name == "Linux" || os_name == "macOS" || os_name == "Windows" || !os_name.is_empty()
         );
@@ -264,24 +260,19 @@ mod tests {
 
     #[test]
     fn test_device_id_persistence() {
-        // Use a temp directory for testing
         let temp_dir = TempDir::new().unwrap();
         let path = temp_dir.path().join("device_id");
 
-        // Write a device ID
         let test_id = "test-device-id-123";
         fs::write(&path, test_id).unwrap();
 
-        // Read it back
         let read_id = fs::read_to_string(&path).unwrap();
         assert_eq!(read_id, test_id);
     }
 
     #[test]
     fn test_collect() {
-        // This will use real system paths, so we just check it doesn't panic
-        let result = DeviceInfo::collect("com.test.app");
-        // May fail if data directory is not writable, which is OK for tests
+        let result = DeviceInfo::collect("test_key");
         if let Ok(info) = result {
             assert!(!info.device_id.is_empty());
             assert!(!info.os_name.is_empty());

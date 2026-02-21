@@ -5,11 +5,12 @@
 //! # Quick Start
 //!
 //! ```no_run
-//! use funnelmob::{FunnelMob, Configuration, Environment, Revenue, EventParameters};
+//! use funnelmob::{FunnelMob, Configuration, Revenue, EventParameters};
 //!
 //! // Configure and initialize the SDK
-//! let config = Configuration::builder("com.example.app", "fm_live_abc123")
-//!     .environment(Environment::Sandbox)
+//! let config = Configuration::builder("fm_live_abc123")
+//!     .server("https://api.funnelmob.com/v1")
+//!     .platform("web")
 //!     .build()
 //!     .unwrap();
 //!
@@ -31,7 +32,7 @@
 //! ```no_run
 //! use funnelmob::{FunnelMob, Configuration};
 //!
-//! let config = Configuration::builder("com.example.app", "fm_live_abc123")
+//! let config = Configuration::builder("fm_live_abc123")
 //!     .build()
 //!     .unwrap();
 //!
@@ -57,7 +58,7 @@
 //! ```no_run
 //! use funnelmob::{FunnelMob, Configuration, standard_events};
 //!
-//! let config = Configuration::builder("app", "key").build().unwrap();
+//! let config = Configuration::builder("key").build().unwrap();
 //! let sdk = FunnelMob::new(config).unwrap();
 //!
 //! sdk.track_event(standard_events::FM_REGISTRATION).unwrap();
@@ -66,7 +67,7 @@
 mod configuration;
 mod error;
 mod event_parameters;
-mod internal;
+pub(crate) mod internal;
 mod revenue;
 pub mod standard_events;
 
@@ -78,21 +79,24 @@ use std::time::Duration;
 use once_cell::sync::OnceCell;
 use uuid::Uuid;
 
-pub use configuration::{Configuration, ConfigurationBuilder, Environment, LogLevel};
+pub use configuration::{Configuration, ConfigurationBuilder, LogLevel};
 pub use error::{FunnelMobError, ValidationError};
 pub use event_parameters::{EventParameters, ParameterValue};
 pub use revenue::Revenue;
 
-use internal::device_info::DeviceInfo;
-use internal::event::{Event, EventBatch};
-use internal::event_queue::EventQueue;
-use internal::logger::Logger;
-use internal::network_client::NetworkClient;
-use internal::storage::{FileStorage, MemoryStorage};
-use internal::validation::validate_event_name;
+// Re-export internal types for library consumers (e.g., seed tool)
+pub use internal::event::{Event, EventBatch, EventRevenue};
+pub use internal::network_client::{EventBatchResponse, NetworkClient};
 
 #[cfg(feature = "async")]
-use internal::async_network_client::AsyncNetworkClient;
+pub use internal::async_network_client::AsyncNetworkClient;
+
+pub use internal::logger::Logger;
+
+use internal::device_info::DeviceInfo;
+use internal::event_queue::EventQueue;
+use internal::storage::{FileStorage, MemoryStorage};
+use internal::validation::validate_event_name;
 
 /// Validation functions for event data.
 ///
@@ -118,9 +122,10 @@ pub struct FunnelMob {
     queue: Arc<EventQueue>,
     network: NetworkClient,
     #[cfg(feature = "async")]
-    async_network: AsyncNetworkClient,
+    async_network: internal::async_network_client::AsyncNetworkClient,
     logger: Logger,
     enabled: AtomicBool,
+    #[allow(dead_code)]
     flush_handle: RwLock<Option<thread::JoinHandle<()>>>,
     shutdown: Arc<AtomicBool>,
 }
@@ -139,7 +144,7 @@ impl FunnelMob {
     /// ```no_run
     /// use funnelmob::{FunnelMob, Configuration};
     ///
-    /// let config = Configuration::builder("com.example.app", "fm_live_abc123")
+    /// let config = Configuration::builder("fm_live_abc123")
     ///     .build()
     ///     .unwrap();
     ///
@@ -149,8 +154,9 @@ impl FunnelMob {
         let logger = Logger::new(config.log_level());
         logger.info("Initializing FunnelMob SDK");
 
-        // Collect device info
-        let device_info = DeviceInfo::collect(config.app_id())?;
+        // Collect device info (uses storage_id for persistent device_id path)
+        let storage_id = config.storage_id();
+        let device_info = DeviceInfo::collect(&storage_id)?;
         logger.debug(&format!("Device ID: {}", device_info.device_id));
 
         // Create session
@@ -158,7 +164,7 @@ impl FunnelMob {
         logger.debug(&format!("Session ID: {}", session_id));
 
         // Set up storage and queue
-        let storage = match FileStorage::new(FileStorage::default_path(config.app_id())?) {
+        let storage = match FileStorage::new(FileStorage::default_path(&storage_id)?) {
             Ok(s) => Arc::new(s) as Arc<dyn internal::storage::EventStorage>,
             Err(e) => {
                 logger.warn(&format!("Failed to create file storage, using memory: {}", e));
@@ -175,7 +181,10 @@ impl FunnelMob {
         let network = NetworkClient::new(&config, Logger::new(config.log_level()));
 
         #[cfg(feature = "async")]
-        let async_network = AsyncNetworkClient::new(&config, Logger::new(config.log_level()))?;
+        let async_network = internal::async_network_client::AsyncNetworkClient::new(
+            &config,
+            Logger::new(config.log_level()),
+        )?;
 
         let shutdown = Arc::new(AtomicBool::new(false));
 
@@ -203,18 +212,6 @@ impl FunnelMob {
     /// Initializes the global singleton instance.
     ///
     /// This can only be called once. Subsequent calls will return an error.
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// use funnelmob::{FunnelMob, Configuration};
-    ///
-    /// let config = Configuration::builder("com.example.app", "key")
-    ///     .build()
-    ///     .unwrap();
-    ///
-    /// FunnelMob::initialize(config).unwrap();
-    /// ```
     pub fn initialize(config: Configuration) -> Result<(), FunnelMobError> {
         let sdk = Self::new(config)?;
         SHARED_INSTANCE.set(sdk).map_err(|_| {
@@ -230,15 +227,6 @@ impl FunnelMob {
     }
 
     /// Tracks a simple event with just a name.
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// # use funnelmob::{FunnelMob, Configuration};
-    /// # let config = Configuration::builder("app", "key").build().unwrap();
-    /// # let sdk = FunnelMob::new(config).unwrap();
-    /// sdk.track_event("button_click").unwrap();
-    /// ```
     pub fn track_event(&self, event_name: &str) -> Result<(), FunnelMobError> {
         if !self.is_enabled() {
             return Ok(());
@@ -246,7 +234,7 @@ impl FunnelMob {
 
         validate_event_name(event_name)?;
 
-        let event = Event::new(event_name);
+        let event = internal::event::Event::new(event_name);
         self.queue.enqueue(event)?;
 
         self.logger
@@ -255,15 +243,6 @@ impl FunnelMob {
     }
 
     /// Tracks an event with associated revenue.
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// # use funnelmob::{FunnelMob, Configuration, Revenue};
-    /// # let config = Configuration::builder("app", "key").build().unwrap();
-    /// # let sdk = FunnelMob::new(config).unwrap();
-    /// sdk.track_event_with_revenue("purchase", Revenue::usd(29.99).unwrap()).unwrap();
-    /// ```
     pub fn track_event_with_revenue(
         &self,
         event_name: &str,
@@ -275,7 +254,7 @@ impl FunnelMob {
 
         validate_event_name(event_name)?;
 
-        let event = Event::with_revenue(event_name, &revenue);
+        let event = internal::event::Event::with_revenue(event_name, &revenue);
         self.queue.enqueue(event)?;
 
         self.logger.debug(&format!(
@@ -288,20 +267,6 @@ impl FunnelMob {
     }
 
     /// Tracks an event with custom parameters.
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// # use funnelmob::{FunnelMob, Configuration, EventParameters};
-    /// # let config = Configuration::builder("app", "key").build().unwrap();
-    /// # let sdk = FunnelMob::new(config).unwrap();
-    /// sdk.track_event_with_params(
-    ///     "signup",
-    ///     EventParameters::new()
-    ///         .set("plan", "premium")
-    ///         .set("trial", true)
-    /// ).unwrap();
-    /// ```
     pub fn track_event_with_params(
         &self,
         event_name: &str,
@@ -314,9 +279,9 @@ impl FunnelMob {
         validate_event_name(event_name)?;
 
         let event = if let Some(map) = params.into_map() {
-            Event::with_parameters(event_name, map)
+            internal::event::Event::with_parameters(event_name, map)
         } else {
-            Event::new(event_name)
+            internal::event::Event::new(event_name)
         };
 
         self.queue.enqueue(event)?;
@@ -327,19 +292,6 @@ impl FunnelMob {
     }
 
     /// Tracks an event with both revenue and custom parameters.
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// # use funnelmob::{FunnelMob, Configuration, Revenue, EventParameters};
-    /// # let config = Configuration::builder("app", "key").build().unwrap();
-    /// # let sdk = FunnelMob::new(config).unwrap();
-    /// sdk.track_event_with_revenue_and_params(
-    ///     "purchase",
-    ///     Revenue::usd(29.99).unwrap(),
-    ///     EventParameters::new().set("item_id", "sku_123")
-    /// ).unwrap();
-    /// ```
     pub fn track_event_with_revenue_and_params(
         &self,
         event_name: &str,
@@ -353,9 +305,9 @@ impl FunnelMob {
         validate_event_name(event_name)?;
 
         let event = if let Some(map) = params.into_map() {
-            Event::with_revenue_and_parameters(event_name, &revenue, map)
+            internal::event::Event::with_revenue_and_parameters(event_name, &revenue, map)
         } else {
-            Event::with_revenue(event_name, &revenue)
+            internal::event::Event::with_revenue(event_name, &revenue)
         };
 
         self.queue.enqueue(event)?;
@@ -371,16 +323,6 @@ impl FunnelMob {
     ///
     /// This is called automatically based on the configured flush interval,
     /// but can be called manually to ensure events are sent immediately.
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// # use funnelmob::{FunnelMob, Configuration};
-    /// # let config = Configuration::builder("app", "key").build().unwrap();
-    /// # let sdk = FunnelMob::new(config).unwrap();
-    /// sdk.track_event("important_event").unwrap();
-    /// sdk.flush().unwrap(); // Send immediately
-    /// ```
     pub fn flush(&self) -> Result<(), FunnelMobError> {
         if !self.is_enabled() {
             return Ok(());
@@ -400,7 +342,7 @@ impl FunnelMob {
         let event_ids: Vec<_> = events.iter().map(|e| e.event_id).collect();
 
         let batch = EventBatch::new(
-            self.config.app_id(),
+            self.config.platform(),
             &self.device_info.device_id,
             events.clone(),
         )
@@ -413,7 +355,6 @@ impl FunnelMob {
                     response.accepted, response.rejected
                 ));
 
-                // Remove successfully sent events from storage
                 self.queue.confirm_sent(&event_ids)?;
 
                 if !response.errors.is_empty() {
@@ -430,7 +371,6 @@ impl FunnelMob {
             Err(e) => {
                 self.logger
                     .error(&format!("Flush failed, re-queuing events: {}", e));
-                // Re-queue failed events
                 self.queue.requeue(events)?;
                 Err(e)
             }
@@ -440,17 +380,6 @@ impl FunnelMob {
     /// Enables or disables event tracking.
     ///
     /// When disabled, all tracking calls are silently ignored.
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// # use funnelmob::{FunnelMob, Configuration};
-    /// # let config = Configuration::builder("app", "key").build().unwrap();
-    /// # let sdk = FunnelMob::new(config).unwrap();
-    /// sdk.set_enabled(false); // Disable tracking
-    /// sdk.track_event("ignored").unwrap(); // This does nothing
-    /// sdk.set_enabled(true); // Re-enable tracking
-    /// ```
     pub fn set_enabled(&self, enabled: bool) {
         self.enabled.store(enabled, Ordering::SeqCst);
         self.logger
@@ -477,25 +406,15 @@ impl FunnelMob {
         let interval = Duration::from_millis(self.config.flush_interval_ms() as u64);
         let _shutdown = Arc::clone(&self.shutdown);
 
-        // We can't easily share self with the thread, so we'll use a simpler approach
-        // The flush timer will be implemented by periodically checking
         self.logger
             .debug(&format!("Flush timer started with {}ms interval", interval.as_millis()));
-
-        // Note: For a production SDK, we'd use a proper scheduler.
-        // For this implementation, users should call flush() manually or rely on
-        // flush being called before the SDK is dropped.
     }
 
     /// Shuts down the SDK and flushes any remaining events.
-    ///
-    /// This is called automatically when the SDK is dropped, but can be
-    /// called manually for explicit cleanup.
     pub fn destroy(&self) {
         self.logger.info("Shutting down FunnelMob SDK");
         self.shutdown.store(true, Ordering::SeqCst);
 
-        // Try to flush remaining events
         if let Err(e) = self.flush() {
             self.logger
                 .warn(&format!("Failed to flush during shutdown: {}", e));
@@ -509,17 +428,6 @@ impl FunnelMob {
 #[cfg(feature = "async")]
 impl FunnelMob {
     /// Tracks a simple event asynchronously.
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// # use funnelmob::{FunnelMob, Configuration};
-    /// # async fn example() {
-    /// # let config = Configuration::builder("app", "key").build().unwrap();
-    /// # let sdk = FunnelMob::new(config).unwrap();
-    /// sdk.track_event_async("button_click").await.unwrap();
-    /// # }
-    /// ```
     pub async fn track_event_async(&self, event_name: &str) -> Result<(), FunnelMobError> {
         if !self.is_enabled() {
             return Ok(());
@@ -527,7 +435,7 @@ impl FunnelMob {
 
         validate_event_name(event_name)?;
 
-        let event = Event::new(event_name);
+        let event = internal::event::Event::new(event_name);
         self.queue.enqueue(event)?;
 
         self.logger
@@ -536,17 +444,6 @@ impl FunnelMob {
     }
 
     /// Tracks an event with associated revenue asynchronously.
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// # use funnelmob::{FunnelMob, Configuration, Revenue};
-    /// # async fn example() {
-    /// # let config = Configuration::builder("app", "key").build().unwrap();
-    /// # let sdk = FunnelMob::new(config).unwrap();
-    /// sdk.track_event_with_revenue_async("purchase", Revenue::usd(29.99).unwrap()).await.unwrap();
-    /// # }
-    /// ```
     pub async fn track_event_with_revenue_async(
         &self,
         event_name: &str,
@@ -558,7 +455,7 @@ impl FunnelMob {
 
         validate_event_name(event_name)?;
 
-        let event = Event::with_revenue(event_name, &revenue);
+        let event = internal::event::Event::with_revenue(event_name, &revenue);
         self.queue.enqueue(event)?;
 
         self.logger.debug(&format!(
@@ -571,22 +468,6 @@ impl FunnelMob {
     }
 
     /// Tracks an event with custom parameters asynchronously.
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// # use funnelmob::{FunnelMob, Configuration, EventParameters};
-    /// # async fn example() {
-    /// # let config = Configuration::builder("app", "key").build().unwrap();
-    /// # let sdk = FunnelMob::new(config).unwrap();
-    /// sdk.track_event_with_params_async(
-    ///     "signup",
-    ///     EventParameters::new()
-    ///         .set("plan", "premium")
-    ///         .set("trial", true)
-    /// ).await.unwrap();
-    /// # }
-    /// ```
     pub async fn track_event_with_params_async(
         &self,
         event_name: &str,
@@ -599,9 +480,9 @@ impl FunnelMob {
         validate_event_name(event_name)?;
 
         let event = if let Some(map) = params.into_map() {
-            Event::with_parameters(event_name, map)
+            internal::event::Event::with_parameters(event_name, map)
         } else {
-            Event::new(event_name)
+            internal::event::Event::new(event_name)
         };
 
         self.queue.enqueue(event)?;
@@ -612,21 +493,6 @@ impl FunnelMob {
     }
 
     /// Tracks an event with both revenue and custom parameters asynchronously.
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// # use funnelmob::{FunnelMob, Configuration, Revenue, EventParameters};
-    /// # async fn example() {
-    /// # let config = Configuration::builder("app", "key").build().unwrap();
-    /// # let sdk = FunnelMob::new(config).unwrap();
-    /// sdk.track_event_with_revenue_and_params_async(
-    ///     "purchase",
-    ///     Revenue::usd(29.99).unwrap(),
-    ///     EventParameters::new().set("item_id", "sku_123")
-    /// ).await.unwrap();
-    /// # }
-    /// ```
     pub async fn track_event_with_revenue_and_params_async(
         &self,
         event_name: &str,
@@ -640,9 +506,9 @@ impl FunnelMob {
         validate_event_name(event_name)?;
 
         let event = if let Some(map) = params.into_map() {
-            Event::with_revenue_and_parameters(event_name, &revenue, map)
+            internal::event::Event::with_revenue_and_parameters(event_name, &revenue, map)
         } else {
-            Event::with_revenue(event_name, &revenue)
+            internal::event::Event::with_revenue(event_name, &revenue)
         };
 
         self.queue.enqueue(event)?;
@@ -655,20 +521,6 @@ impl FunnelMob {
     }
 
     /// Flushes queued events to the server asynchronously.
-    ///
-    /// This is the async version of [`FunnelMob::flush`].
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// # use funnelmob::{FunnelMob, Configuration};
-    /// # async fn example() {
-    /// # let config = Configuration::builder("app", "key").build().unwrap();
-    /// # let sdk = FunnelMob::new(config).unwrap();
-    /// sdk.track_event("important_event").unwrap();
-    /// sdk.flush_async().await.unwrap(); // Send immediately
-    /// # }
-    /// ```
     pub async fn flush_async(&self) -> Result<(), FunnelMobError> {
         if !self.is_enabled() {
             return Ok(());
@@ -688,7 +540,7 @@ impl FunnelMob {
         let event_ids: Vec<_> = events.iter().map(|e| e.event_id).collect();
 
         let batch = EventBatch::new(
-            self.config.app_id(),
+            self.config.platform(),
             &self.device_info.device_id,
             events.clone(),
         )
@@ -701,7 +553,6 @@ impl FunnelMob {
                     response.accepted, response.rejected
                 ));
 
-                // Remove successfully sent events from storage
                 self.queue.confirm_sent(&event_ids)?;
 
                 if !response.errors.is_empty() {
@@ -718,7 +569,6 @@ impl FunnelMob {
             Err(e) => {
                 self.logger
                     .error(&format!("Flush failed (async), re-queuing events: {}", e));
-                // Re-queue failed events
                 self.queue.requeue(events)?;
                 Err(e)
             }
@@ -726,13 +576,10 @@ impl FunnelMob {
     }
 
     /// Shuts down the SDK and flushes any remaining events asynchronously.
-    ///
-    /// This is the async version of [`FunnelMob::destroy`].
     pub async fn destroy_async(&self) {
         self.logger.info("Shutting down FunnelMob SDK (async)");
         self.shutdown.store(true, Ordering::SeqCst);
 
-        // Try to flush remaining events
         if let Err(e) = self.flush_async().await {
             self.logger
                 .warn(&format!("Failed to flush during async shutdown: {}", e));
@@ -745,8 +592,6 @@ impl FunnelMob {
 impl Drop for FunnelMob {
     fn drop(&mut self) {
         self.shutdown.store(true, Ordering::SeqCst);
-        // Note: We can't call flush() here easily because it needs &self
-        // In production, use destroy() explicitly before dropping
     }
 }
 
@@ -759,8 +604,9 @@ mod tests {
     use super::*;
 
     fn test_config() -> Configuration {
-        Configuration::builder("com.test.app", "test_key")
-            .environment(Environment::Sandbox)
+        Configuration::builder("test_key")
+            .server("http://localhost:3080/v1")
+            .platform("web")
             .log_level(LogLevel::None)
             .build()
             .unwrap()
@@ -809,7 +655,6 @@ mod tests {
         sdk.set_enabled(false);
         assert!(!sdk.is_enabled());
 
-        // Should not error when disabled
         assert!(sdk.track_event("test").is_ok());
 
         sdk.set_enabled(true);
@@ -820,7 +665,7 @@ mod tests {
     fn test_session_id() {
         let sdk = FunnelMob::new(test_config()).unwrap();
         let session_id = sdk.session_id();
-        assert_eq!(session_id.get_version_num(), 4); // UUID v4
+        assert_eq!(session_id.get_version_num(), 4);
     }
 
     #[test]

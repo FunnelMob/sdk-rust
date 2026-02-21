@@ -5,11 +5,12 @@
 
 #![cfg(feature = "async")]
 
-use funnelmob::{Configuration, Environment, EventParameters, FunnelMob, LogLevel, Revenue};
+use funnelmob::{Configuration, EventParameters, FunnelMob, LogLevel, Revenue};
 
 fn test_sdk() -> FunnelMob {
-    let config = Configuration::builder("com.test.async", "test_key")
-        .environment(Environment::Sandbox)
+    let config = Configuration::builder("test_key")
+        .server("http://localhost:3080/v1")
+        .platform("web")
         .log_level(LogLevel::None)
         .build()
         .unwrap();
@@ -72,7 +73,6 @@ async fn test_async_disabled() {
     let sdk = test_sdk();
     sdk.set_enabled(false);
 
-    // Should succeed silently when disabled
     assert!(sdk.track_event_async("ignored").await.is_ok());
     assert!(sdk.flush_async().await.is_ok());
 
@@ -82,15 +82,14 @@ async fn test_async_disabled() {
 
 #[tokio::test]
 async fn test_flush_async_empty_queue() {
-    // Create a fresh SDK instance that hasn't tracked any events
-    let config = Configuration::builder("com.test.async.empty", "test_key")
-        .environment(Environment::Sandbox)
+    let config = Configuration::builder("test_key_empty")
+        .server("http://localhost:3080/v1")
+        .platform("web")
         .log_level(LogLevel::None)
         .build()
         .unwrap();
     let sdk = FunnelMob::new(config).unwrap();
 
-    // Disable the SDK so flush returns immediately without network call
     sdk.set_enabled(false);
     assert!(sdk.flush_async().await.is_ok());
 }
@@ -99,31 +98,24 @@ async fn test_flush_async_empty_queue() {
 async fn test_mixed_sync_async() {
     let sdk = test_sdk();
 
-    // Mix sync and async calls
     sdk.track_event("sync_event").unwrap();
     sdk.track_event_async("async_event").await.unwrap();
     sdk.track_event("sync_event_2").unwrap();
     sdk.track_event_async("async_event_2").await.unwrap();
-
-    // Both types should be queued
-    // Note: We can't easily verify queue contents, but no errors means success
 }
 
 #[tokio::test]
 async fn test_concurrent_async_tracking() {
-    // Spawn multiple async tasks
     let handles: Vec<_> = (0..10)
         .map(|i| {
             let event_name = format!("concurrent_event_{}", i);
             async move {
-                // Each task creates its own SDK instance
                 let sdk = test_sdk();
                 sdk.track_event_async(&event_name).await
             }
         })
         .collect();
 
-    // Wait for all tasks
     for handle in handles {
         assert!(handle.await.is_ok());
     }

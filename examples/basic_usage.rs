@@ -3,13 +3,14 @@
 //! Run with: cargo run --example basic_usage
 
 use funnelmob::{
-    standard_events, Configuration, Environment, EventParameters, FunnelMob, LogLevel, Revenue,
+    standard_events, Configuration, EventParameters, FunnelMob, LogLevel, Revenue,
 };
 
 fn main() {
     // Configure the SDK
-    let config = Configuration::builder("com.example.myapp", "your_api_key_here")
-        .environment(Environment::Sandbox)
+    let config = Configuration::builder("your_api_key_here")
+        .server("http://localhost:3080/v1")
+        .platform("web")
         .log_level(LogLevel::Debug)
         .flush_interval_ms(5000)
         .max_batch_size(50)
@@ -81,20 +82,17 @@ fn main() {
     sdk.set_enabled(false);
     println!("  Enabled: {}", sdk.is_enabled());
 
-    // Events are silently dropped when disabled
     sdk.track_event("ignored_event")
         .expect("Should succeed silently");
     println!("  Tracked event while disabled (silently ignored)");
 
-    // Re-enable
     sdk.set_enabled(true);
     println!("  Re-enabled: {}", sdk.is_enabled());
 
     // Flush pending events
     println!("\nFlushing events...");
     if let Err(e) = sdk.flush() {
-        // Expected to fail without a real API endpoint
-        println!("  Flush result: {} (expected in sandbox without server)", e);
+        println!("  Flush result: {} (expected without server)", e);
     } else {
         println!("  Flush completed successfully");
     }

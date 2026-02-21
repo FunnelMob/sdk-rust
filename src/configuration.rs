@@ -2,26 +2,6 @@
 
 use crate::error::FunnelMobError;
 
-/// The environment to use for API requests.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Environment {
-    /// Production environment (https://api.funnelmob.com/v1).
-    #[default]
-    Production,
-    /// Sandbox environment for testing (https://sandbox.funnelmob.com/v1).
-    Sandbox,
-}
-
-impl Environment {
-    /// Returns the base URL for this environment.
-    pub fn base_url(&self) -> &'static str {
-        match self {
-            Environment::Production => "https://api.funnelmob.com/v1",
-            Environment::Sandbox => "https://sandbox.funnelmob.com/v1",
-        }
-    }
-}
-
 /// Log level for SDK internal logging.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum LogLevel {
@@ -39,6 +19,9 @@ pub enum LogLevel {
     /// All messages including verbose output.
     Verbose = 5,
 }
+
+/// Default server URL.
+const DEFAULT_SERVER: &str = "https://api.funnelmob.com/v1";
 
 /// Default flush interval in milliseconds.
 const DEFAULT_FLUSH_INTERVAL_MS: u32 = 30_000;
@@ -62,10 +45,11 @@ const MAX_BATCH_SIZE: u32 = 100;
 /// # Example
 ///
 /// ```
-/// use funnelmob::{Configuration, Environment, LogLevel};
+/// use funnelmob::{Configuration, LogLevel};
 ///
-/// let config = Configuration::builder("com.example.app", "fm_live_abc123")
-///     .environment(Environment::Sandbox)
+/// let config = Configuration::builder("fm_live_abc123")
+///     .server("https://api.funnelmob.com/v1")
+///     .platform("web")
 ///     .log_level(LogLevel::Debug)
 ///     .flush_interval_ms(60_000)
 ///     .max_batch_size(50)
@@ -74,20 +58,19 @@ const MAX_BATCH_SIZE: u32 = 100;
 /// ```
 #[derive(Debug, Clone)]
 pub struct Configuration {
-    pub(crate) app_id: String,
     pub(crate) api_key: String,
-    pub(crate) environment: Environment,
+    pub(crate) server: String,
+    pub(crate) platform: String,
     pub(crate) log_level: LogLevel,
     pub(crate) flush_interval_ms: u32,
     pub(crate) max_batch_size: u32,
 }
 
 impl Configuration {
-    /// Creates a new configuration builder with the required app ID and API key.
+    /// Creates a new configuration builder with the required API key.
     ///
     /// # Arguments
     ///
-    /// * `app_id` - Your application identifier (e.g., "com.example.app")
     /// * `api_key` - Your FunnelMob API key
     ///
     /// # Example
@@ -95,22 +78,22 @@ impl Configuration {
     /// ```
     /// use funnelmob::Configuration;
     ///
-    /// let config = Configuration::builder("com.example.app", "fm_live_abc123")
+    /// let config = Configuration::builder("fm_live_abc123")
     ///     .build()
     ///     .unwrap();
     /// ```
-    pub fn builder(app_id: impl Into<String>, api_key: impl Into<String>) -> ConfigurationBuilder {
-        ConfigurationBuilder::new(app_id, api_key)
+    pub fn builder(api_key: impl Into<String>) -> ConfigurationBuilder {
+        ConfigurationBuilder::new(api_key)
     }
 
-    /// Returns the base URL for API requests based on the configured environment.
-    pub fn base_url(&self) -> &str {
-        self.environment.base_url()
+    /// Returns the server base URL for API requests.
+    pub fn server(&self) -> &str {
+        &self.server
     }
 
-    /// Returns the app ID.
-    pub fn app_id(&self) -> &str {
-        &self.app_id
+    /// Returns the platform identifier (e.g., "ios", "android", "web").
+    pub fn platform(&self) -> &str {
+        &self.platform
     }
 
     /// Returns the API key.
@@ -118,9 +101,21 @@ impl Configuration {
         &self.api_key
     }
 
-    /// Returns the environment.
-    pub fn environment(&self) -> Environment {
-        self.environment
+    /// Returns a storage identifier derived from the API key.
+    ///
+    /// Uses the last 8 characters of the API key (or the full key if shorter)
+    /// as a stable, filesystem-safe identifier for per-key storage paths.
+    pub fn storage_id(&self) -> String {
+        let key = &self.api_key;
+        let suffix = if key.len() > 8 {
+            &key[key.len() - 8..]
+        } else {
+            key
+        };
+        suffix
+            .chars()
+            .map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' })
+            .collect()
     }
 
     /// Returns the log level.
@@ -144,42 +139,52 @@ impl Configuration {
 /// # Example
 ///
 /// ```
-/// use funnelmob::{Configuration, Environment, LogLevel};
+/// use funnelmob::{Configuration, LogLevel};
 ///
-/// let config = Configuration::builder("com.example.app", "fm_live_abc123")
-///     .environment(Environment::Sandbox)
+/// let config = Configuration::builder("fm_live_abc123")
+///     .server("http://localhost:3080/v1")
+///     .platform("web")
 ///     .log_level(LogLevel::Debug)
 ///     .build()
 ///     .unwrap();
 /// ```
 #[derive(Debug)]
 pub struct ConfigurationBuilder {
-    app_id: String,
     api_key: String,
-    environment: Environment,
+    server: String,
+    platform: String,
     log_level: LogLevel,
     flush_interval_ms: u32,
     max_batch_size: u32,
 }
 
 impl ConfigurationBuilder {
-    /// Creates a new builder with the required app ID and API key.
-    fn new(app_id: impl Into<String>, api_key: impl Into<String>) -> Self {
+    /// Creates a new builder with the required API key.
+    fn new(api_key: impl Into<String>) -> Self {
         Self {
-            app_id: app_id.into(),
             api_key: api_key.into(),
-            environment: Environment::default(),
+            server: DEFAULT_SERVER.to_string(),
+            platform: detect_platform(),
             log_level: LogLevel::default(),
             flush_interval_ms: DEFAULT_FLUSH_INTERVAL_MS,
             max_batch_size: DEFAULT_MAX_BATCH_SIZE,
         }
     }
 
-    /// Sets the environment for API requests.
+    /// Sets the server base URL for API requests.
     ///
-    /// Default: [`Environment::Production`]
-    pub fn environment(mut self, environment: Environment) -> Self {
-        self.environment = environment;
+    /// Default: `https://api.funnelmob.com/v1`
+    pub fn server(mut self, server: impl Into<String>) -> Self {
+        self.server = server.into();
+        self
+    }
+
+    /// Sets the platform identifier sent with each event batch.
+    ///
+    /// Default: auto-detected from the OS (e.g., "linux", "macos", "windows").
+    /// For the seed tool, override with "ios", "android", or "web".
+    pub fn platform(mut self, platform: impl Into<String>) -> Self {
+        self.platform = platform.into();
         self
     }
 
@@ -215,28 +220,68 @@ impl ConfigurationBuilder {
     ///
     /// # Errors
     ///
-    /// Returns an error if the app ID or API key is empty.
+    /// Returns an error if the API key or server URL is empty.
     pub fn build(self) -> Result<Configuration, FunnelMobError> {
-        if self.app_id.is_empty() {
-            return Err(FunnelMobError::Configuration(
-                "app_id is required".to_string(),
-            ));
-        }
-
         if self.api_key.is_empty() {
             return Err(FunnelMobError::Configuration(
                 "api_key is required".to_string(),
             ));
         }
 
+        if self.server.is_empty() {
+            return Err(FunnelMobError::Configuration(
+                "server URL is required".to_string(),
+            ));
+        }
+
+        if self.platform.is_empty() {
+            return Err(FunnelMobError::Configuration(
+                "platform is required".to_string(),
+            ));
+        }
+
         Ok(Configuration {
-            app_id: self.app_id,
             api_key: self.api_key,
-            environment: self.environment,
+            server: self.server,
+            platform: self.platform,
             log_level: self.log_level,
             flush_interval_ms: self.flush_interval_ms,
             max_batch_size: self.max_batch_size,
         })
+    }
+}
+
+/// Auto-detect platform from the current OS.
+fn detect_platform() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        "macos".to_string()
+    }
+    #[cfg(target_os = "linux")]
+    {
+        "linux".to_string()
+    }
+    #[cfg(target_os = "windows")]
+    {
+        "windows".to_string()
+    }
+    #[cfg(target_os = "ios")]
+    {
+        "ios".to_string()
+    }
+    #[cfg(target_os = "android")]
+    {
+        "android".to_string()
+    }
+    #[cfg(not(any(
+        target_os = "macos",
+        target_os = "linux",
+        target_os = "windows",
+        target_os = "ios",
+        target_os = "android"
+    )))]
+    {
+        std::env::consts::OS.to_string()
     }
 }
 
@@ -246,13 +291,13 @@ mod tests {
 
     #[test]
     fn test_minimal_configuration() {
-        let config = Configuration::builder("com.example.app", "fm_live_abc123")
+        let config = Configuration::builder("fm_live_abc123")
             .build()
             .unwrap();
 
-        assert_eq!(config.app_id(), "com.example.app");
         assert_eq!(config.api_key(), "fm_live_abc123");
-        assert_eq!(config.environment(), Environment::Production);
+        assert_eq!(config.server(), DEFAULT_SERVER);
+        assert!(!config.platform().is_empty());
         assert_eq!(config.log_level(), LogLevel::None);
         assert_eq!(config.flush_interval_ms(), 30_000);
         assert_eq!(config.max_batch_size(), 100);
@@ -260,50 +305,65 @@ mod tests {
 
     #[test]
     fn test_full_configuration() {
-        let config = Configuration::builder("com.example.app", "fm_live_abc123")
-            .environment(Environment::Sandbox)
+        let config = Configuration::builder("fm_live_abc123")
+            .server("http://localhost:3080/v1")
+            .platform("web")
             .log_level(LogLevel::Debug)
             .flush_interval_ms(60_000)
             .max_batch_size(50)
             .build()
             .unwrap();
 
-        assert_eq!(config.environment(), Environment::Sandbox);
+        assert_eq!(config.server(), "http://localhost:3080/v1");
+        assert_eq!(config.platform(), "web");
         assert_eq!(config.log_level(), LogLevel::Debug);
         assert_eq!(config.flush_interval_ms(), 60_000);
         assert_eq!(config.max_batch_size(), 50);
     }
 
     #[test]
-    fn test_empty_app_id() {
-        let result = Configuration::builder("", "fm_live_abc123").build();
+    fn test_empty_api_key() {
+        let result = Configuration::builder("").build();
         assert!(matches!(result, Err(FunnelMobError::Configuration(_))));
     }
 
     #[test]
-    fn test_empty_api_key() {
-        let result = Configuration::builder("com.example.app", "").build();
+    fn test_empty_server() {
+        let result = Configuration::builder("key").server("").build();
         assert!(matches!(result, Err(FunnelMobError::Configuration(_))));
+    }
+
+    #[test]
+    fn test_empty_platform() {
+        let result = Configuration::builder("key").platform("").build();
+        assert!(matches!(result, Err(FunnelMobError::Configuration(_))));
+    }
+
+    #[test]
+    fn test_storage_id() {
+        let config = Configuration::builder("fm_prod_abcdefghij123456")
+            .build()
+            .unwrap();
+        let storage_id = config.storage_id();
+        assert_eq!(storage_id.len(), 8);
+        assert!(storage_id.chars().all(|c| c.is_alphanumeric() || c == '_'));
     }
 
     #[test]
     fn test_flush_interval_clamping() {
-        // Below minimum
-        let config = Configuration::builder("app", "key")
+        let config = Configuration::builder("key")
             .flush_interval_ms(500)
             .build()
             .unwrap();
         assert_eq!(config.flush_interval_ms(), 1000);
 
-        // At minimum
-        let config = Configuration::builder("app", "key")
+        let config = Configuration::builder("key")
             .flush_interval_ms(1000)
             .build()
             .unwrap();
         assert_eq!(config.flush_interval_ms(), 1000);
 
-        // Above minimum
-        let config = Configuration::builder("app", "key")
+        let config = Configuration::builder("key")
             .flush_interval_ms(5000)
             .build()
             .unwrap();
@@ -312,36 +372,25 @@ mod tests {
 
     #[test]
     fn test_batch_size_clamping() {
-        // Below minimum
-        let config = Configuration::builder("app", "key")
+        let config = Configuration::builder("key")
             .max_batch_size(0)
             .build()
             .unwrap();
         assert_eq!(config.max_batch_size(), 1);
 
-        // At minimum
-        let config = Configuration::builder("app", "key")
-            .max_batch_size(1)
-            .build()
-            .unwrap();
-        assert_eq!(config.max_batch_size(), 1);
-
-        // In range
-        let config = Configuration::builder("app", "key")
+        let config = Configuration::builder("key")
             .max_batch_size(50)
             .build()
             .unwrap();
         assert_eq!(config.max_batch_size(), 50);
 
-        // At maximum
-        let config = Configuration::builder("app", "key")
+        let config = Configuration::builder("key")
             .max_batch_size(100)
             .build()
             .unwrap();
         assert_eq!(config.max_batch_size(), 100);
 
-        // Above maximum
-        let config = Configuration::builder("app", "key")
+        let config = Configuration::builder("key")
             .max_batch_size(150)
             .build()
             .unwrap();
@@ -349,30 +398,18 @@ mod tests {
     }
 
     #[test]
-    fn test_environment_base_urls() {
-        assert_eq!(
-            Environment::Production.base_url(),
-            "https://api.funnelmob.com/v1"
-        );
-        assert_eq!(
-            Environment::Sandbox.base_url(),
-            "https://sandbox.funnelmob.com/v1"
-        );
+    fn test_default_server_url() {
+        let config = Configuration::builder("key").build().unwrap();
+        assert_eq!(config.server(), "https://api.funnelmob.com/v1");
     }
 
     #[test]
-    fn test_configuration_base_url() {
-        let prod_config = Configuration::builder("app", "key")
-            .environment(Environment::Production)
+    fn test_custom_server_url() {
+        let config = Configuration::builder("key")
+            .server("http://localhost:3080/v1")
             .build()
             .unwrap();
-        assert_eq!(prod_config.base_url(), "https://api.funnelmob.com/v1");
-
-        let sandbox_config = Configuration::builder("app", "key")
-            .environment(Environment::Sandbox)
-            .build()
-            .unwrap();
-        assert_eq!(sandbox_config.base_url(), "https://sandbox.funnelmob.com/v1");
+        assert_eq!(config.server(), "http://localhost:3080/v1");
     }
 
     #[test]

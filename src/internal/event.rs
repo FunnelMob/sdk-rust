@@ -155,6 +155,10 @@ pub struct EventBatch {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<Uuid>,
 
+    /// User identifier for identified users.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<String>,
+
     /// Events in this batch.
     pub events: Vec<Event>,
 }
@@ -166,6 +170,7 @@ impl EventBatch {
             platform: platform.into(),
             device_id: device_id.into(),
             session_id: None,
+            user_id: None,
             events,
         }
     }
@@ -173,6 +178,12 @@ impl EventBatch {
     /// Sets the session ID.
     pub fn with_session_id(mut self, session_id: Uuid) -> Self {
         self.session_id = Some(session_id);
+        self
+    }
+
+    /// Sets the user ID.
+    pub fn with_user_id(mut self, user_id: impl Into<String>) -> Self {
+        self.user_id = Some(user_id.into());
         self
     }
 }

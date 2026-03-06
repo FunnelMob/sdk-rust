@@ -86,7 +86,7 @@ pub use revenue::Revenue;
 
 // Re-export internal types for library consumers (e.g., seed tool)
 pub use internal::event::{Event, EventBatch, EventRevenue};
-pub use internal::network_client::{EventBatchResponse, NetworkClient};
+pub use internal::network_client::{EventBatchResponse, IdentifyRequest, IdentifyResponse, NetworkClient};
 
 #[cfg(feature = "async")]
 pub use internal::async_network_client::AsyncNetworkClient;

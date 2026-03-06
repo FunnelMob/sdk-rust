@@ -54,6 +54,25 @@ pub struct SessionResponse {
     pub server_timestamp: String,
 }
 
+/// User identification request.
+#[derive(Debug, Clone, Serialize)]
+pub struct IdentifyRequest {
+    pub device_id: String,
+    pub user_id: String,
+    pub platform: String,
+    pub timestamp: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_properties: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<serde_json::Value>,
+}
+
+/// Response from the identify API.
+#[derive(Debug, Clone, Deserialize)]
+pub struct IdentifyResponse {
+    pub status: String,
+}
+
 /// Network error types.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NetworkErrorKind {
@@ -108,6 +127,15 @@ impl NetworkClient {
         request: &SessionRequest,
     ) -> Result<SessionResponse, FunnelMobError> {
         let url = format!("{}/session", self.base_url);
+        self.post_with_retry(&url, request)
+    }
+
+    /// Sends a user identification request.
+    pub fn send_identify(
+        &self,
+        request: &IdentifyRequest,
+    ) -> Result<IdentifyResponse, FunnelMobError> {
+        let url = format!("{}/identify", self.base_url);
         self.post_with_retry(&url, request)
     }
 

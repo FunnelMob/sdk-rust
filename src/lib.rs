@@ -451,15 +451,15 @@ impl FunnelMob {
         &self,
         callback: F,
     ) {
-        // Fire immediately if config already loaded
-        if let Ok(guard) = self.remote_config.read() {
-            if let Some(ref config) = *guard {
-                callback(config);
-            }
-        }
-
+        // Lock callbacks first to avoid TOCTOU race with background fetch thread
         if let Ok(mut callbacks) = self.config_callbacks.lock() {
             callbacks.push(Box::new(callback));
+            // Check if config already loaded while holding the lock
+            if let Ok(guard) = self.remote_config.read() {
+                if let Some(ref config) = *guard {
+                    callbacks.last().unwrap()(config);
+                }
+            }
         }
     }
 
@@ -467,19 +467,10 @@ impl FunnelMob {
     fn fetch_remote_config_background(&self) {
         let remote_config = Arc::clone(&self.remote_config);
         let config_callbacks = Arc::clone(&self.config_callbacks);
-        let config = Configuration::builder(self.config.api_key())
-            .server(self.config.server())
-            .platform(self.config.platform())
-            .log_level(self.config.log_level())
-            .build();
-
-        let logger = Logger::new(self.config.log_level());
+        let config = self.config.clone();
+        let logger = Logger::new(config.log_level());
 
         thread::spawn(move || {
-            let config = match config {
-                Ok(c) => c,
-                Err(_) => return,
-            };
             let client = NetworkClient::new(&config, Logger::new(config.log_level()));
 
             match client.fetch_config() {

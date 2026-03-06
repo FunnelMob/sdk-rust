@@ -139,6 +139,109 @@ impl NetworkClient {
         self.post_with_retry(&url, request)
     }
 
+    /// Fetches remote config from the API.
+    ///
+    /// Returns a flat key-value map of config values.
+    pub fn fetch_config(&self) -> Result<std::collections::HashMap<String, serde_json::Value>, FunnelMobError> {
+        let url = format!("{}/config", self.base_url);
+        self.get_with_retry(&url)
+    }
+
+    /// Makes a GET request with retry logic.
+    fn get_with_retry<R: for<'de> Deserialize<'de>>(
+        &self,
+        url: &str,
+    ) -> Result<R, FunnelMobError> {
+        let mut last_error = None;
+
+        for attempt in 0..=self.max_retries {
+            if attempt > 0 {
+                let delay = self.calculate_backoff(attempt);
+                self.logger.debug(&format!(
+                    "Retry attempt {} after {}ms delay",
+                    attempt, delay
+                ));
+                std::thread::sleep(Duration::from_millis(delay));
+            }
+
+            match self.do_get(url) {
+                Ok(response) => return Ok(response),
+                Err((kind, msg)) => {
+                    self.logger
+                        .warn(&format!("Request failed (attempt {}): {}", attempt + 1, msg));
+
+                    if !Self::should_retry(&kind) {
+                        return Err(FunnelMobError::Configuration(format!(
+                            "Network error ({}): {}",
+                            Self::error_kind_name(&kind),
+                            msg
+                        )));
+                    }
+
+                    last_error = Some((kind, msg));
+                }
+            }
+        }
+
+        let (kind, msg) = last_error.unwrap_or((NetworkErrorKind::Unknown, "Unknown error".to_string()));
+        Err(FunnelMobError::Configuration(format!(
+            "Network error after {} retries ({}): {}",
+            self.max_retries,
+            Self::error_kind_name(&kind),
+            msg
+        )))
+    }
+
+    /// Makes a single GET request.
+    fn do_get<R: for<'de> Deserialize<'de>>(
+        &self,
+        url: &str,
+    ) -> Result<R, (NetworkErrorKind, String)> {
+        let response = ureq::get(url)
+            .set("X-FM-API-Key", &self.api_key)
+            .timeout(Duration::from_secs(30))
+            .call();
+
+        match response {
+            Ok(resp) => {
+                let status = resp.status();
+                if (200..300).contains(&status) {
+                    resp.into_json()
+                        .map_err(|e| (NetworkErrorKind::Unknown, format!("Failed to parse response: {}", e)))
+                } else {
+                    Err((NetworkErrorKind::Unknown, format!("Unexpected status: {}", status)))
+                }
+            }
+            Err(ureq::Error::Status(status, resp)) => {
+                let body = resp.into_string().unwrap_or_default();
+                let kind = match status {
+                    401 => NetworkErrorKind::Unauthorized,
+                    429 => NetworkErrorKind::RateLimited,
+                    400..=499 => NetworkErrorKind::ClientError,
+                    500..=599 => NetworkErrorKind::ServerError,
+                    _ => NetworkErrorKind::Unknown,
+                };
+                Err((kind, format!("HTTP {}: {}", status, body)))
+            }
+            Err(ureq::Error::Transport(transport)) => {
+                let kind = match transport.kind() {
+                    ureq::ErrorKind::Io => {
+                        if transport.to_string().to_lowercase().contains("timeout") {
+                            NetworkErrorKind::Timeout
+                        } else {
+                            NetworkErrorKind::ConnectionError
+                        }
+                    }
+                    ureq::ErrorKind::ConnectionFailed | ureq::ErrorKind::Dns => {
+                        NetworkErrorKind::ConnectionError
+                    }
+                    _ => NetworkErrorKind::ConnectionError,
+                };
+                Err((kind, transport.to_string()))
+            }
+        }
+    }
+
     /// Makes a POST request with retry logic.
     fn post_with_retry<T: Serialize, R: for<'de> Deserialize<'de>>(
         &self,

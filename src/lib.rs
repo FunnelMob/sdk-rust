@@ -71,8 +71,9 @@ pub(crate) mod internal;
 mod revenue;
 pub mod standard_events;
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::Duration;
 
@@ -128,6 +129,8 @@ pub struct FunnelMob {
     #[allow(dead_code)]
     flush_handle: RwLock<Option<thread::JoinHandle<()>>>,
     shutdown: Arc<AtomicBool>,
+    remote_config: Arc<RwLock<Option<HashMap<String, serde_json::Value>>>>,
+    config_callbacks: Arc<Mutex<Vec<Box<dyn Fn(&HashMap<String, serde_json::Value>) + Send + Sync + 'static>>>>,
 }
 
 impl FunnelMob {
@@ -188,6 +191,10 @@ impl FunnelMob {
 
         let shutdown = Arc::new(AtomicBool::new(false));
 
+        let remote_config = Arc::new(RwLock::new(None));
+        let config_callbacks: Arc<Mutex<Vec<Box<dyn Fn(&HashMap<String, serde_json::Value>) + Send + Sync + 'static>>>> =
+            Arc::new(Mutex::new(Vec::new()));
+
         let sdk = Self {
             config,
             device_info,
@@ -200,10 +207,15 @@ impl FunnelMob {
             enabled: AtomicBool::new(true),
             flush_handle: RwLock::new(None),
             shutdown,
+            remote_config,
+            config_callbacks,
         };
 
         // Start flush timer
         sdk.start_flush_timer();
+
+        // Fetch remote config in background
+        sdk.fetch_remote_config_background();
 
         sdk.logger.info("FunnelMob SDK initialized");
         Ok(sdk)
@@ -399,6 +411,95 @@ impl FunnelMob {
     /// Returns the device ID.
     pub fn device_id(&self) -> &str {
         &self.device_info.device_id
+    }
+
+    // MARK: - Remote Config
+
+    /// Gets a single remote config value by key.
+    ///
+    /// Returns `None` if the key doesn't exist or config hasn't been loaded.
+    pub fn get_config(&self, key: &str) -> Option<serde_json::Value> {
+        let guard = self.remote_config.read().ok()?;
+        guard.as_ref()?.get(key).cloned()
+    }
+
+    /// Gets a single remote config value, deserializing to the desired type.
+    ///
+    /// Returns the default value if the key doesn't exist or deserialization fails.
+    pub fn get_config_or<T: serde::de::DeserializeOwned>(&self, key: &str, default: T) -> T {
+        match self.get_config(key) {
+            Some(value) => serde_json::from_value(value).unwrap_or(default),
+            None => default,
+        }
+    }
+
+    /// Gets all remote config values.
+    ///
+    /// Returns an empty map if config hasn't been loaded.
+    pub fn get_all_config(&self) -> HashMap<String, serde_json::Value> {
+        self.remote_config
+            .read()
+            .ok()
+            .and_then(|guard| guard.clone())
+            .unwrap_or_default()
+    }
+
+    /// Registers a callback that fires when remote config is loaded.
+    ///
+    /// If config has already been loaded, the callback fires immediately.
+    pub fn on_config_loaded<F: Fn(&HashMap<String, serde_json::Value>) + Send + Sync + 'static>(
+        &self,
+        callback: F,
+    ) {
+        // Fire immediately if config already loaded
+        if let Ok(guard) = self.remote_config.read() {
+            if let Some(ref config) = *guard {
+                callback(config);
+            }
+        }
+
+        if let Ok(mut callbacks) = self.config_callbacks.lock() {
+            callbacks.push(Box::new(callback));
+        }
+    }
+
+    /// Fetches remote config in a background thread.
+    fn fetch_remote_config_background(&self) {
+        let remote_config = Arc::clone(&self.remote_config);
+        let config_callbacks = Arc::clone(&self.config_callbacks);
+        let config = Configuration::builder(self.config.api_key())
+            .server(self.config.server())
+            .platform(self.config.platform())
+            .log_level(self.config.log_level())
+            .build();
+
+        let logger = Logger::new(self.config.log_level());
+
+        thread::spawn(move || {
+            let config = match config {
+                Ok(c) => c,
+                Err(_) => return,
+            };
+            let client = NetworkClient::new(&config, Logger::new(config.log_level()));
+
+            match client.fetch_config() {
+                Ok(config_data) => {
+                    if let Ok(mut guard) = remote_config.write() {
+                        *guard = Some(config_data.clone());
+                    }
+                    logger.debug("Remote config loaded");
+
+                    if let Ok(callbacks) = config_callbacks.lock() {
+                        for callback in callbacks.iter() {
+                            callback(&config_data);
+                        }
+                    }
+                }
+                Err(e) => {
+                    logger.error(&format!("Failed to fetch remote config: {}", e));
+                }
+            }
+        });
     }
 
     /// Starts the automatic flush timer.

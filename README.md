@@ -104,25 +104,48 @@ sdk.track_event_with_revenue_and_params("subscribe", revenue, params).unwrap();
 
 ## Standard Events
 
-Use predefined event names for consistent analytics:
+### Using Typed Methods (Recommended)
+
+29 typed methods provide type-safe, self-documenting event tracking without needing to remember event name strings:
+
+```rust
+// Simple events
+sdk.track_page_view()?;
+sdk.track_add_to_cart_with_params(
+    EventParameters::new().set("item_id", "SKU-123")
+)?;
+
+// Revenue events (amount + currency required)
+sdk.track_purchase(29.99, "USD")?;
+sdk.track_purchase_with_params(29.99, "USD",
+    EventParameters::new().set("order_id", "ORD-456")
+)?;
+sdk.track_subscribe(9.99, "USD")?;
+sdk.track_start_trial(0.0, "USD")?;
+sdk.track_donate(10.0, "USD")?;
+
+// Spend credits (amount only)
+sdk.track_spent_credits(100.0)?;
+```
+
+See [docs/specs/sdk_events_reference.md](../docs/specs/sdk_events_reference.md) for the full list of 29 typed methods with platform support details.
+
+### Using Constants
+
+For custom event name handling or when using the generic `track_event` API:
 
 ```rust
 use funnelmob::standard_events;
 
-sdk.track_event(standard_events::FM_REGISTRATION).unwrap();
-sdk.track_event(standard_events::FM_LOGIN).unwrap();
-sdk.track_event(standard_events::FM_PURCHASE).unwrap();
-sdk.track_event(standard_events::FM_ADD_TO_CART).unwrap();
-sdk.track_event(standard_events::FM_CHECKOUT_START).unwrap();
-sdk.track_event(standard_events::FM_LEVEL_COMPLETE).unwrap();
-sdk.track_event(standard_events::FM_TUTORIAL_COMPLETE).unwrap();
-sdk.track_event(standard_events::FM_SUBSCRIBE).unwrap();
-sdk.track_event(standard_events::FM_START_TRIAL).unwrap();
-sdk.track_event(standard_events::FM_RATE).unwrap();
-sdk.track_event(standard_events::FM_SHARE).unwrap();
-sdk.track_event(standard_events::FM_INVITE).unwrap();
-sdk.track_event(standard_events::FM_ACHIEVEMENT).unwrap();
-sdk.track_event(standard_events::FM_SPEND_CREDITS).unwrap();
+sdk.track_event(standard_events::FM_REGISTRATION)?;
+sdk.track_event(standard_events::FM_LOGIN)?;
+sdk.track_event(standard_events::FM_PURCHASE)?;
+sdk.track_event(standard_events::FM_ADD_TO_CART)?;
+sdk.track_event(standard_events::FM_SUBSCRIBE)?;
+sdk.track_event(standard_events::FM_START_TRIAL)?;
+sdk.track_event(standard_events::FM_RATE)?;
+sdk.track_event(standard_events::FM_SPEND_CREDITS)?;
+// ... and many more constants in the standard_events module
 ```
 
 ## Global Singleton

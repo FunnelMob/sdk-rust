@@ -45,6 +45,75 @@ pub const FM_ACHIEVEMENT: &str = "fm_achievement";
 /// Standard event for spending virtual currency.
 pub const FM_SPEND_CREDITS: &str = "fm_spend_credits";
 
+/// Standard event for viewing a page or screen.
+pub const FM_PAGE_VIEW: &str = "fm_page_view";
+
+/// Standard event for viewing a content item (product, article, etc.).
+pub const FM_VIEW_CONTENT: &str = "fm_view_content";
+
+/// Standard event for performing a search.
+pub const FM_SEARCH: &str = "fm_search";
+
+/// Standard event for adding an item to a wishlist.
+pub const FM_ADD_TO_WISHLIST: &str = "fm_add_to_wishlist";
+
+/// Standard event for initiating checkout.
+pub const FM_INITIATE_CHECKOUT: &str = "fm_initiate_checkout";
+
+/// Standard event for adding payment information.
+pub const FM_ADD_PAYMENT_INFO: &str = "fm_add_payment_info";
+
+/// Standard event for generating a lead.
+pub const FM_LEAD: &str = "fm_lead";
+
+/// Standard event for completing registration.
+pub const FM_COMPLETE_REGISTRATION: &str = "fm_complete_registration";
+
+/// Standard event for a contact interaction.
+pub const FM_CONTACT: &str = "fm_contact";
+
+/// Standard event for scheduling an appointment.
+pub const FM_SCHEDULE: &str = "fm_schedule";
+
+/// Standard event for finding a physical location.
+pub const FM_FIND_LOCATION: &str = "fm_find_location";
+
+/// Standard event for customizing a product.
+pub const FM_CUSTOMIZE_PRODUCT: &str = "fm_customize_product";
+
+/// Standard event for making a donation.
+pub const FM_DONATE: &str = "fm_donate";
+
+/// Standard event for submitting an application.
+pub const FM_SUBMIT_APPLICATION: &str = "fm_submit_application";
+
+/// Standard event for an application being approved.
+pub const FM_APPLICATION_APPROVAL: &str = "fm_application_approval";
+
+/// Standard event for downloading content.
+pub const FM_DOWNLOAD: &str = "fm_download";
+
+/// Standard event for submitting a form.
+pub const FM_SUBMIT_FORM: &str = "fm_submit_form";
+
+/// Standard event for achieving a level in a game.
+pub const FM_ACHIEVE_LEVEL: &str = "fm_achieve_level";
+
+/// Standard event for unlocking an achievement.
+pub const FM_UNLOCK_ACHIEVEMENT: &str = "fm_unlock_achievement";
+
+/// Standard event for completing a tutorial.
+pub const FM_COMPLETE_TUTORIAL: &str = "fm_complete_tutorial";
+
+/// Standard event for activating the app (first launch after install).
+pub const FM_ACTIVATE_APP: &str = "fm_activate_app";
+
+/// Standard event for a user clicking an in-app ad.
+pub const FM_IN_APP_AD_CLICK: &str = "fm_in_app_ad_click";
+
+/// Standard event for an in-app ad impression.
+pub const FM_IN_APP_AD_IMPRESSION: &str = "fm_in_app_ad_impression";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -67,6 +136,29 @@ mod tests {
             FM_INVITE,
             FM_ACHIEVEMENT,
             FM_SPEND_CREDITS,
+            FM_PAGE_VIEW,
+            FM_VIEW_CONTENT,
+            FM_SEARCH,
+            FM_ADD_TO_WISHLIST,
+            FM_INITIATE_CHECKOUT,
+            FM_ADD_PAYMENT_INFO,
+            FM_LEAD,
+            FM_COMPLETE_REGISTRATION,
+            FM_CONTACT,
+            FM_SCHEDULE,
+            FM_FIND_LOCATION,
+            FM_CUSTOMIZE_PRODUCT,
+            FM_DONATE,
+            FM_SUBMIT_APPLICATION,
+            FM_APPLICATION_APPROVAL,
+            FM_DOWNLOAD,
+            FM_SUBMIT_FORM,
+            FM_ACHIEVE_LEVEL,
+            FM_UNLOCK_ACHIEVEMENT,
+            FM_COMPLETE_TUTORIAL,
+            FM_ACTIVATE_APP,
+            FM_IN_APP_AD_CLICK,
+            FM_IN_APP_AD_IMPRESSION,
         ];
 
         for event in events {

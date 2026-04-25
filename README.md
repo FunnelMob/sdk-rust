@@ -21,12 +21,11 @@ funnelmob = { version = "0.1.0", features = ["async"] }
 ## Quick Start
 
 ```rust
-use funnelmob::{FunnelMob, Configuration, Environment};
+use funnelmob::{FunnelMob, Configuration};
 
 fn main() {
     // Configure the SDK
-    let config = Configuration::builder("com.example.myapp", "fm_live_abc123")
-        .environment(Environment::Production)
+    let config = Configuration::builder("fm_live_abc123")
         .build()
         .unwrap();
 
@@ -44,16 +43,33 @@ fn main() {
 ## Configuration
 
 ```rust
-use funnelmob::{Configuration, Environment, LogLevel};
+use funnelmob::{Configuration, LogLevel};
 
-let config = Configuration::builder("com.example.myapp", "your_api_key")
-    .environment(Environment::Production)  // or Environment::Sandbox
-    .log_level(LogLevel::Debug)            // None, Error, Warning, Info, Debug, Verbose
-    .flush_interval_ms(30000)              // Auto-flush interval (min: 1000ms)
-    .max_batch_size(100)                   // Events per batch (1-100)
+let config = Configuration::builder("your_api_key")
+    .server("http://localhost:3080")  // Optional: Override the API host (default: https://api.funnelmob.com)
+    .platform("web")                  // Optional: defaults to detected OS
+    .log_level(LogLevel::Debug)       // None, Error, Warning, Info, Debug, Verbose
+    .flush_interval_ms(30000)         // Auto-flush interval (min: 1000ms)
+    .max_batch_size(100)              // Events per batch (1-100)
     .build()
     .unwrap();
 ```
+
+### Custom Base URL
+
+By default the SDK calls `https://api.funnelmob.com`, appending `/v1/<endpoint>`
+to each request. Override with `.server(...)` for local development:
+
+```rust
+let config = Configuration::builder("fm_test_key")
+    .server("http://localhost:3080")
+    .build()
+    .unwrap();
+```
+
+Pass the **host root only** — the SDK appends `/v1` itself, so
+`http://localhost:3080` (not `http://localhost:3080/v1`). A trailing slash is
+trimmed automatically.
 
 ## Event Tracking
 
@@ -156,7 +172,7 @@ For convenience, use the singleton pattern:
 use funnelmob::{FunnelMob, Configuration};
 
 // Initialize once at startup
-let config = Configuration::builder("com.example.app", "api_key")
+let config = Configuration::builder("api_key")
     .build()
     .unwrap();
 FunnelMob::initialize(config).unwrap();
@@ -176,7 +192,7 @@ use funnelmob::{FunnelMob, Configuration, Revenue, EventParameters};
 
 #[tokio::main]
 async fn main() {
-    let config = Configuration::builder("com.example.app", "api_key")
+    let config = Configuration::builder("api_key")
         .build()
         .unwrap();
     let sdk = FunnelMob::new(config).unwrap();

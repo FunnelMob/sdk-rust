@@ -9,7 +9,7 @@ use funnelmob::{Configuration, EventParameters, FunnelMob, LogLevel, Revenue};
 
 fn test_sdk() -> FunnelMob {
     let config = Configuration::builder("test_key")
-        .server("http://localhost:3080/v1")
+        .server("http://localhost:3080")
         .platform("web")
         .log_level(LogLevel::None)
         .build()
@@ -83,7 +83,7 @@ async fn test_async_disabled() {
 #[tokio::test]
 async fn test_flush_async_empty_queue() {
     let config = Configuration::builder("test_key_empty")
-        .server("http://localhost:3080/v1")
+        .server("http://localhost:3080")
         .platform("web")
         .log_level(LogLevel::None)
         .build()

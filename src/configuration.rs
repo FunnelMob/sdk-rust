@@ -20,8 +20,10 @@ pub enum LogLevel {
     Verbose = 5,
 }
 
-/// Default server URL.
-const DEFAULT_SERVER: &str = "https://api.funnelmob.com/v1";
+/// Default server URL. The SDK appends `/v1/<endpoint>` to this root for
+/// every request, so callers should pass the host root (no `/v1`) when
+/// overriding via [`ConfigurationBuilder::server`].
+pub(crate) const DEFAULT_SERVER: &str = "https://api.funnelmob.com";
 
 /// Default flush interval in milliseconds.
 const DEFAULT_FLUSH_INTERVAL_MS: u32 = 30_000;
@@ -48,7 +50,7 @@ const MAX_BATCH_SIZE: u32 = 100;
 /// use funnelmob::{Configuration, LogLevel};
 ///
 /// let config = Configuration::builder("fm_live_abc123")
-///     .server("https://api.funnelmob.com/v1")
+///     .server("https://api.funnelmob.com")
 ///     .platform("web")
 ///     .log_level(LogLevel::Debug)
 ///     .flush_interval_ms(60_000)
@@ -142,7 +144,7 @@ impl Configuration {
 /// use funnelmob::{Configuration, LogLevel};
 ///
 /// let config = Configuration::builder("fm_live_abc123")
-///     .server("http://localhost:3080/v1")
+///     .server("http://localhost:3080")
 ///     .platform("web")
 ///     .log_level(LogLevel::Debug)
 ///     .build()
@@ -173,9 +175,14 @@ impl ConfigurationBuilder {
 
     /// Sets the server base URL for API requests.
     ///
-    /// Default: `https://api.funnelmob.com/v1`
+    /// Pass the host root only — the SDK appends `/v1/<endpoint>` itself.
+    /// A trailing slash is trimmed automatically. An empty string is
+    /// rejected at [`ConfigurationBuilder::build`] time.
+    ///
+    /// Default: `https://api.funnelmob.com`
     pub fn server(mut self, server: impl Into<String>) -> Self {
-        self.server = server.into();
+        let raw: String = server.into();
+        self.server = raw.trim_end_matches('/').to_string();
         self
     }
 
@@ -306,7 +313,7 @@ mod tests {
     #[test]
     fn test_full_configuration() {
         let config = Configuration::builder("fm_live_abc123")
-            .server("http://localhost:3080/v1")
+            .server("http://localhost:3080")
             .platform("web")
             .log_level(LogLevel::Debug)
             .flush_interval_ms(60_000)
@@ -314,7 +321,7 @@ mod tests {
             .build()
             .unwrap();
 
-        assert_eq!(config.server(), "http://localhost:3080/v1");
+        assert_eq!(config.server(), "http://localhost:3080");
         assert_eq!(config.platform(), "web");
         assert_eq!(config.log_level(), LogLevel::Debug);
         assert_eq!(config.flush_interval_ms(), 60_000);
@@ -400,16 +407,34 @@ mod tests {
     #[test]
     fn test_default_server_url() {
         let config = Configuration::builder("key").build().unwrap();
-        assert_eq!(config.server(), "https://api.funnelmob.com/v1");
+        assert_eq!(config.server(), "https://api.funnelmob.com");
     }
 
     #[test]
     fn test_custom_server_url() {
         let config = Configuration::builder("key")
-            .server("http://localhost:3080/v1")
+            .server("http://localhost:3080")
             .build()
             .unwrap();
-        assert_eq!(config.server(), "http://localhost:3080/v1");
+        assert_eq!(config.server(), "http://localhost:3080");
+    }
+
+    #[test]
+    fn test_server_trims_trailing_slash() {
+        let config = Configuration::builder("key")
+            .server("http://localhost:3080/")
+            .build()
+            .unwrap();
+        assert_eq!(config.server(), "http://localhost:3080");
+    }
+
+    #[test]
+    fn test_server_trims_multiple_trailing_slashes() {
+        let config = Configuration::builder("key")
+            .server("http://localhost:3080///")
+            .build()
+            .unwrap();
+        assert_eq!(config.server(), "http://localhost:3080");
     }
 
     #[test]

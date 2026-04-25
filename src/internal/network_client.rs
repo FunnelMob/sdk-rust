@@ -117,7 +117,7 @@ impl NetworkClient {
     ///
     /// Retries on transient failures with exponential backoff.
     pub fn send_events(&self, batch: &EventBatch) -> Result<EventBatchResponse, FunnelMobError> {
-        let url = format!("{}/events", self.base_url);
+        let url = self.endpoint_url("events");
         self.post_with_retry(&url, batch)
     }
 
@@ -126,7 +126,7 @@ impl NetworkClient {
         &self,
         request: &SessionRequest,
     ) -> Result<SessionResponse, FunnelMobError> {
-        let url = format!("{}/session", self.base_url);
+        let url = self.endpoint_url("session");
         self.post_with_retry(&url, request)
     }
 
@@ -135,7 +135,7 @@ impl NetworkClient {
         &self,
         request: &IdentifyRequest,
     ) -> Result<IdentifyResponse, FunnelMobError> {
-        let url = format!("{}/identify", self.base_url);
+        let url = self.endpoint_url("identify");
         self.post_with_retry(&url, request)
     }
 
@@ -143,8 +143,14 @@ impl NetworkClient {
     ///
     /// Returns a flat key-value map of config values.
     pub fn fetch_config(&self) -> Result<std::collections::HashMap<String, serde_json::Value>, FunnelMobError> {
-        let url = format!("{}/config", self.base_url);
+        let url = self.endpoint_url("config");
         self.get_with_retry(&url)
+    }
+
+    /// Builds a versioned endpoint URL by appending `/v1/<endpoint>` to the
+    /// configured server root.
+    fn endpoint_url(&self, endpoint: &str) -> String {
+        format!("{}/v1/{}", self.base_url.trim_end_matches('/'), endpoint)
     }
 
     /// Makes a GET request with retry logic.
@@ -416,6 +422,49 @@ mod tests {
         assert_eq!(
             NetworkClient::error_kind_name(&NetworkErrorKind::RateLimited),
             "rate_limited"
+        );
+    }
+
+    #[test]
+    fn test_endpoint_url_uses_default_server() {
+        let config = Configuration::builder("key").build().unwrap();
+        let client = NetworkClient::new(&config, Logger::default());
+
+        assert_eq!(
+            client.endpoint_url("events"),
+            "https://api.funnelmob.com/v1/events"
+        );
+        assert_eq!(
+            client.endpoint_url("session"),
+            "https://api.funnelmob.com/v1/session"
+        );
+    }
+
+    #[test]
+    fn test_endpoint_url_uses_custom_server() {
+        let config = Configuration::builder("key")
+            .server("http://localhost:3080")
+            .build()
+            .unwrap();
+        let client = NetworkClient::new(&config, Logger::default());
+
+        assert_eq!(
+            client.endpoint_url("events"),
+            "http://localhost:3080/v1/events"
+        );
+    }
+
+    #[test]
+    fn test_endpoint_url_handles_trailing_slash() {
+        let config = Configuration::builder("key")
+            .server("http://localhost:3080/")
+            .build()
+            .unwrap();
+        let client = NetworkClient::new(&config, Logger::default());
+
+        assert_eq!(
+            client.endpoint_url("events"),
+            "http://localhost:3080/v1/events"
         );
     }
 

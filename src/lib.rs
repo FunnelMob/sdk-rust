@@ -9,7 +9,7 @@
 //!
 //! // Configure and initialize the SDK
 //! let config = Configuration::builder("fm_live_abc123")
-//!     .server("https://api.funnelmob.com/v1")
+//!     .server("https://api.funnelmob.com")
 //!     .platform("web")
 //!     .build()
 //!     .unwrap();
@@ -991,7 +991,7 @@ mod tests {
 
     fn test_config() -> Configuration {
         Configuration::builder("test_key")
-            .server("http://localhost:3080/v1")
+            .server("http://localhost:3080")
             .platform("web")
             .log_level(LogLevel::None)
             .build()

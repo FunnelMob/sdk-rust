@@ -9,7 +9,7 @@ use funnelmob::{
 
 fn test_sdk() -> FunnelMob {
     let config = Configuration::builder("test_key")
-        .server("http://localhost:3080/v1")
+        .server("http://localhost:3080")
         .platform("web")
         .log_level(LogLevel::None)
         .build()

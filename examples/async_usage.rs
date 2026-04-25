@@ -12,7 +12,7 @@ use funnelmob::{
 async fn main() {
     // Configure the SDK
     let config = Configuration::builder("your_api_key_here")
-        .server("http://localhost:3080/v1")
+        .server("http://localhost:3080")
         .platform("web")
         .log_level(LogLevel::Debug)
         .flush_interval_ms(5000)

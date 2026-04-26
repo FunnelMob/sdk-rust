@@ -148,7 +148,10 @@ impl NetworkClient {
     }
 
     /// Builds a versioned endpoint URL by appending `/v1/<endpoint>` to the
-    /// configured server root.
+    /// configured server root. The trailing-slash trim is defensive —
+    /// `ConfigurationBuilder::server` already trims at construction time,
+    /// but the field is `pub(crate)` and could be set elsewhere in the
+    /// future, so we re-trim here to keep this function self-contained.
     fn endpoint_url(&self, endpoint: &str) -> String {
         format!("{}/v1/{}", self.base_url.trim_end_matches('/'), endpoint)
     }

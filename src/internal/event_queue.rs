@@ -46,17 +46,17 @@ impl EventQueue {
         })
     }
 
-    /// Adds an event to the queue.
+    /// Adds an event to the queue. Returns the new queue size.
     ///
     /// If the queue is at max capacity, the oldest events will be dropped.
-    pub fn enqueue(&self, event: Event) -> Result<(), FunnelMobError> {
+    pub fn enqueue(&self, event: Event) -> Result<usize, FunnelMobError> {
         self.enqueue_batch(vec![event])
     }
 
-    /// Adds multiple events to the queue.
+    /// Adds multiple events to the queue. Returns the new queue size.
     ///
     /// If the queue would exceed max capacity, the oldest events will be dropped.
-    pub fn enqueue_batch(&self, new_events: Vec<Event>) -> Result<(), FunnelMobError> {
+    pub fn enqueue_batch(&self, new_events: Vec<Event>) -> Result<usize, FunnelMobError> {
         let mut events = self.events.write().map_err(|e| {
             FunnelMobError::Configuration(format!("Failed to lock queue: {}", e))
         })?;
@@ -79,7 +79,7 @@ impl EventQueue {
             }
         }
 
-        Ok(())
+        Ok(events.len())
     }
 
     /// Takes up to `count` events from the front of the queue.

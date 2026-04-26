@@ -93,6 +93,7 @@ pub enum NetworkErrorKind {
 }
 
 /// Synchronous HTTP client for the FunnelMob API.
+#[derive(Clone)]
 pub struct NetworkClient {
     base_url: String,
     api_key: String,

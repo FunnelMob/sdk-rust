@@ -3,6 +3,7 @@
 use crate::configuration::LogLevel;
 
 /// Internal logger that respects the configured log level.
+#[derive(Clone)]
 pub struct Logger {
     level: LogLevel,
     prefix: &'static str,

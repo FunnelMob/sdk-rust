@@ -126,7 +126,6 @@ pub struct FunnelMob {
     async_network: internal::async_network_client::AsyncNetworkClient,
     logger: Logger,
     enabled: AtomicBool,
-    #[allow(dead_code)]
     flush_handle: RwLock<Option<thread::JoinHandle<()>>>,
     shutdown: Arc<AtomicBool>,
     remote_config: Arc<RwLock<Option<HashMap<String, serde_json::Value>>>>,
@@ -247,10 +246,11 @@ impl FunnelMob {
         validate_event_name(event_name)?;
 
         let event = internal::event::Event::new(event_name);
-        self.queue.enqueue(event)?;
+        let new_size = self.queue.enqueue(event)?;
 
         self.logger
             .debug(&format!("Tracked event: {}", event_name));
+        self.maybe_flush_at_threshold(new_size);
         Ok(())
     }
 
@@ -267,7 +267,7 @@ impl FunnelMob {
         validate_event_name(event_name)?;
 
         let event = internal::event::Event::with_revenue(event_name, &revenue);
-        self.queue.enqueue(event)?;
+        let new_size = self.queue.enqueue(event)?;
 
         self.logger.debug(&format!(
             "Tracked event: {} with revenue {} {}",
@@ -275,6 +275,7 @@ impl FunnelMob {
             revenue.amount_string(),
             revenue.currency()
         ));
+        self.maybe_flush_at_threshold(new_size);
         Ok(())
     }
 
@@ -296,10 +297,11 @@ impl FunnelMob {
             internal::event::Event::new(event_name)
         };
 
-        self.queue.enqueue(event)?;
+        let new_size = self.queue.enqueue(event)?;
 
         self.logger
             .debug(&format!("Tracked event: {} with params", event_name));
+        self.maybe_flush_at_threshold(new_size);
         Ok(())
     }
 
@@ -322,13 +324,27 @@ impl FunnelMob {
             internal::event::Event::with_revenue(event_name, &revenue)
         };
 
-        self.queue.enqueue(event)?;
+        let new_size = self.queue.enqueue(event)?;
 
         self.logger.debug(&format!(
             "Tracked event: {} with revenue and params",
             event_name
         ));
+        self.maybe_flush_at_threshold(new_size);
         Ok(())
+    }
+
+    /// Triggers a synchronous flush when the queue depth has reached the
+    /// configured batch size. Errors are logged and swallowed so callers
+    /// of `track_event*` are not surfaced to network failures here — the
+    /// periodic timer and re-queue path will retry.
+    fn maybe_flush_at_threshold(&self, queue_size: usize) {
+        if queue_size >= self.config.max_batch_size() as usize {
+            if let Err(e) = self.flush() {
+                self.logger
+                    .warn(&format!("Threshold flush failed: {}", e));
+            }
+        }
     }
 
     // MARK: - Typed Standard Event Methods
@@ -634,38 +650,51 @@ impl FunnelMob {
             return Ok(());
         }
 
-        let batch_size = self.config.max_batch_size() as usize;
-        let events = self.queue.take(batch_size)?;
+        Self::flush_inner(
+            &self.queue,
+            &self.network,
+            &self.config,
+            &self.device_info.device_id,
+            self.session_id,
+            &self.logger,
+        )
+    }
+
+    fn flush_inner(
+        queue: &EventQueue,
+        network: &NetworkClient,
+        config: &Configuration,
+        device_id: &str,
+        session_id: Uuid,
+        logger: &Logger,
+    ) -> Result<(), FunnelMobError> {
+        let batch_size = config.max_batch_size() as usize;
+        let events = queue.take(batch_size)?;
 
         if events.is_empty() {
-            self.logger.debug("No events to flush");
+            logger.debug("No events to flush");
             return Ok(());
         }
 
-        self.logger
-            .info(&format!("Flushing {} events", events.len()));
+        logger.info(&format!("Flushing {} events", events.len()));
 
         let event_ids: Vec<_> = events.iter().map(|e| e.event_id).collect();
 
-        let batch = EventBatch::new(
-            self.config.platform(),
-            &self.device_info.device_id,
-            events.clone(),
-        )
-        .with_session_id(self.session_id);
+        let batch = EventBatch::new(config.platform(), device_id, events.clone())
+            .with_session_id(session_id);
 
-        match self.network.send_events(&batch) {
+        match network.send_events(&batch) {
             Ok(response) => {
-                self.logger.info(&format!(
+                logger.info(&format!(
                     "Flush complete: {} accepted, {} rejected",
                     response.accepted, response.rejected
                 ));
 
-                self.queue.confirm_sent(&event_ids)?;
+                queue.confirm_sent(&event_ids)?;
 
                 if !response.errors.is_empty() {
                     for error in &response.errors {
-                        self.logger.warn(&format!(
+                        logger.warn(&format!(
                             "Event {} rejected: {} - {}",
                             error.event_id, error.code, error.message
                         ));
@@ -675,9 +704,8 @@ impl FunnelMob {
                 Ok(())
             }
             Err(e) => {
-                self.logger
-                    .error(&format!("Flush failed, re-queuing events: {}", e));
-                self.queue.requeue(events)?;
+                logger.error(&format!("Flush failed, re-queuing events: {}", e));
+                queue.requeue(events)?;
                 Err(e)
             }
         }
@@ -790,7 +818,41 @@ impl FunnelMob {
     /// Starts the automatic flush timer.
     fn start_flush_timer(&self) {
         let interval = Duration::from_millis(self.config.flush_interval_ms() as u64);
-        let _shutdown = Arc::clone(&self.shutdown);
+        let shutdown = Arc::clone(&self.shutdown);
+        let queue = Arc::clone(&self.queue);
+        let network = self.network.clone();
+        let config = self.config.clone();
+        let device_id = self.device_info.device_id.clone();
+        let session_id = self.session_id;
+        let logger = self.logger.clone();
+
+        let handle = thread::spawn(move || {
+            let tick = Duration::from_millis(200);
+            let mut elapsed = Duration::ZERO;
+
+            while !shutdown.load(Ordering::SeqCst) {
+                if elapsed >= interval {
+                    if let Err(e) = Self::flush_inner(
+                        &queue,
+                        &network,
+                        &config,
+                        &device_id,
+                        session_id,
+                        &logger,
+                    ) {
+                        logger.warn(&format!("Periodic flush failed: {}", e));
+                    }
+                    elapsed = Duration::ZERO;
+                } else {
+                    thread::sleep(tick);
+                    elapsed += tick;
+                }
+            }
+        });
+
+        if let Ok(mut slot) = self.flush_handle.write() {
+            *slot = Some(handle);
+        }
 
         self.logger
             .debug(&format!("Flush timer started with {}ms interval", interval.as_millis()));
@@ -822,10 +884,11 @@ impl FunnelMob {
         validate_event_name(event_name)?;
 
         let event = internal::event::Event::new(event_name);
-        self.queue.enqueue(event)?;
+        let new_size = self.queue.enqueue(event)?;
 
         self.logger
             .debug(&format!("Tracked event (async): {}", event_name));
+        self.maybe_flush_at_threshold_async(new_size).await;
         Ok(())
     }
 
@@ -842,7 +905,7 @@ impl FunnelMob {
         validate_event_name(event_name)?;
 
         let event = internal::event::Event::with_revenue(event_name, &revenue);
-        self.queue.enqueue(event)?;
+        let new_size = self.queue.enqueue(event)?;
 
         self.logger.debug(&format!(
             "Tracked event (async): {} with revenue {} {}",
@@ -850,6 +913,7 @@ impl FunnelMob {
             revenue.amount_string(),
             revenue.currency()
         ));
+        self.maybe_flush_at_threshold_async(new_size).await;
         Ok(())
     }
 
@@ -871,10 +935,11 @@ impl FunnelMob {
             internal::event::Event::new(event_name)
         };
 
-        self.queue.enqueue(event)?;
+        let new_size = self.queue.enqueue(event)?;
 
         self.logger
             .debug(&format!("Tracked event (async): {} with params", event_name));
+        self.maybe_flush_at_threshold_async(new_size).await;
         Ok(())
     }
 
@@ -897,13 +962,24 @@ impl FunnelMob {
             internal::event::Event::with_revenue(event_name, &revenue)
         };
 
-        self.queue.enqueue(event)?;
+        let new_size = self.queue.enqueue(event)?;
 
         self.logger.debug(&format!(
             "Tracked event (async): {} with revenue and params",
             event_name
         ));
+        self.maybe_flush_at_threshold_async(new_size).await;
         Ok(())
+    }
+
+    /// Async variant of [`maybe_flush_at_threshold`] that uses the async flush path.
+    async fn maybe_flush_at_threshold_async(&self, queue_size: usize) {
+        if queue_size >= self.config.max_batch_size() as usize {
+            if let Err(e) = self.flush_async().await {
+                self.logger
+                    .warn(&format!("Threshold flush (async) failed: {}", e));
+            }
+        }
     }
 
     /// Flushes queued events to the server asynchronously.
@@ -978,6 +1054,16 @@ impl FunnelMob {
 impl Drop for FunnelMob {
     fn drop(&mut self) {
         self.shutdown.store(true, Ordering::SeqCst);
+
+        let handle = self
+            .flush_handle
+            .write()
+            .ok()
+            .and_then(|mut slot| slot.take());
+
+        if let Some(handle) = handle {
+            let _ = handle.join();
+        }
     }
 }
 

@@ -47,7 +47,7 @@ async fn main() {
 
     // Track a purchase with revenue asynchronously
     let revenue = Revenue::usd(29.99).expect("Invalid revenue");
-    sdk.track_event_with_revenue_async(standard_events::FM_PURCHASE, revenue)
+    sdk.track_event_with_revenue_async(standard_events::PURCHASE, revenue)
         .await
         .expect("Failed to track purchase");
     println!("Tracked (async): fm_purchase with $29.99 USD");
@@ -60,7 +60,7 @@ async fn main() {
         .set("auto_renew", true);
 
     sdk.track_event_with_revenue_and_params_async(
-        standard_events::FM_SUBSCRIBE,
+        standard_events::SUBSCRIBE,
         subscription_revenue,
         subscription_params,
     )

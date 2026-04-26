@@ -61,7 +61,7 @@
 //! let config = Configuration::builder("key").build().unwrap();
 //! let sdk = FunnelMob::new(config).unwrap();
 //!
-//! sdk.track_event(standard_events::FM_REGISTRATION).unwrap();
+//! sdk.track_event(standard_events::COMPLETE_REGISTRATION).unwrap();
 //! ```
 
 mod configuration;
@@ -216,6 +216,13 @@ impl FunnelMob {
         // Fetch remote config in background
         sdk.fetch_remote_config_background();
 
+        // Fire app launch event automatically. Hosts that need first-session
+        // semantics should call track_event_with_params with their own gate.
+        if let Err(e) = sdk.track_event(standard_events::ACTIVATE_APP) {
+            sdk.logger
+                .warn(&format!("Failed to fire ActivateApp on init: {}", e));
+        }
+
         sdk.logger.info("FunnelMob SDK initialized");
         Ok(sdk)
     }
@@ -351,294 +358,294 @@ impl FunnelMob {
 
     /// Tracks a page view event.
     pub fn track_page_view(&self) -> Result<(), FunnelMobError> {
-        self.track_event(standard_events::FM_PAGE_VIEW)
+        self.track_event(standard_events::PAGE_VIEW)
     }
 
     /// Tracks a page view event with custom parameters.
     pub fn track_page_view_with_params(&self, params: EventParameters) -> Result<(), FunnelMobError> {
-        self.track_event_with_params(standard_events::FM_PAGE_VIEW, params)
+        self.track_event_with_params(standard_events::PAGE_VIEW, params)
     }
 
     /// Tracks a view content event (product, article, etc.).
     pub fn track_view_content(&self) -> Result<(), FunnelMobError> {
-        self.track_event(standard_events::FM_VIEW_CONTENT)
+        self.track_event(standard_events::VIEW_CONTENT)
     }
 
     /// Tracks a view content event with custom parameters.
     pub fn track_view_content_with_params(&self, params: EventParameters) -> Result<(), FunnelMobError> {
-        self.track_event_with_params(standard_events::FM_VIEW_CONTENT, params)
+        self.track_event_with_params(standard_events::VIEW_CONTENT, params)
     }
 
     /// Tracks a search event.
     pub fn track_search(&self) -> Result<(), FunnelMobError> {
-        self.track_event(standard_events::FM_SEARCH)
+        self.track_event(standard_events::SEARCH)
     }
 
     /// Tracks a search event with custom parameters.
     pub fn track_search_with_params(&self, params: EventParameters) -> Result<(), FunnelMobError> {
-        self.track_event_with_params(standard_events::FM_SEARCH, params)
+        self.track_event_with_params(standard_events::SEARCH, params)
     }
 
     /// Tracks an add to cart event.
     pub fn track_add_to_cart(&self) -> Result<(), FunnelMobError> {
-        self.track_event(standard_events::FM_ADD_TO_CART)
+        self.track_event(standard_events::ADD_TO_CART)
     }
 
     /// Tracks an add to cart event with custom parameters.
     pub fn track_add_to_cart_with_params(&self, params: EventParameters) -> Result<(), FunnelMobError> {
-        self.track_event_with_params(standard_events::FM_ADD_TO_CART, params)
+        self.track_event_with_params(standard_events::ADD_TO_CART, params)
     }
 
     /// Tracks an add to wishlist event.
     pub fn track_add_to_wishlist(&self) -> Result<(), FunnelMobError> {
-        self.track_event(standard_events::FM_ADD_TO_WISHLIST)
+        self.track_event(standard_events::ADD_TO_WISHLIST)
     }
 
     /// Tracks an add to wishlist event with custom parameters.
     pub fn track_add_to_wishlist_with_params(&self, params: EventParameters) -> Result<(), FunnelMobError> {
-        self.track_event_with_params(standard_events::FM_ADD_TO_WISHLIST, params)
+        self.track_event_with_params(standard_events::ADD_TO_WISHLIST, params)
     }
 
     /// Tracks an initiate checkout event.
     pub fn track_initiate_checkout(&self) -> Result<(), FunnelMobError> {
-        self.track_event(standard_events::FM_INITIATE_CHECKOUT)
+        self.track_event(standard_events::INITIATE_CHECKOUT)
     }
 
     /// Tracks an initiate checkout event with custom parameters.
     pub fn track_initiate_checkout_with_params(&self, params: EventParameters) -> Result<(), FunnelMobError> {
-        self.track_event_with_params(standard_events::FM_INITIATE_CHECKOUT, params)
+        self.track_event_with_params(standard_events::INITIATE_CHECKOUT, params)
     }
 
     /// Tracks an add payment info event.
     pub fn track_add_payment_info(&self) -> Result<(), FunnelMobError> {
-        self.track_event(standard_events::FM_ADD_PAYMENT_INFO)
+        self.track_event(standard_events::ADD_PAYMENT_INFO)
     }
 
     /// Tracks an add payment info event with custom parameters.
     pub fn track_add_payment_info_with_params(&self, params: EventParameters) -> Result<(), FunnelMobError> {
-        self.track_event_with_params(standard_events::FM_ADD_PAYMENT_INFO, params)
+        self.track_event_with_params(standard_events::ADD_PAYMENT_INFO, params)
     }
 
     /// Tracks a purchase event with revenue.
     pub fn track_purchase(&self, amount: f64, currency: &str) -> Result<(), FunnelMobError> {
-        self.track_event_with_revenue(standard_events::FM_PURCHASE, Revenue::new(amount, currency)?)
+        self.track_event_with_revenue(standard_events::PURCHASE, Revenue::new(amount, currency)?)
     }
 
     /// Tracks a purchase event with revenue and custom parameters.
     pub fn track_purchase_with_params(&self, amount: f64, currency: &str, params: EventParameters) -> Result<(), FunnelMobError> {
-        self.track_event_with_revenue_and_params(standard_events::FM_PURCHASE, Revenue::new(amount, currency)?, params)
+        self.track_event_with_revenue_and_params(standard_events::PURCHASE, Revenue::new(amount, currency)?, params)
     }
 
     /// Tracks a lead generation event.
     pub fn track_lead(&self) -> Result<(), FunnelMobError> {
-        self.track_event(standard_events::FM_LEAD)
+        self.track_event(standard_events::LEAD)
     }
 
     /// Tracks a lead generation event with custom parameters.
     pub fn track_lead_with_params(&self, params: EventParameters) -> Result<(), FunnelMobError> {
-        self.track_event_with_params(standard_events::FM_LEAD, params)
+        self.track_event_with_params(standard_events::LEAD, params)
     }
 
     /// Tracks a complete registration event.
     pub fn track_complete_registration(&self) -> Result<(), FunnelMobError> {
-        self.track_event(standard_events::FM_COMPLETE_REGISTRATION)
+        self.track_event(standard_events::COMPLETE_REGISTRATION)
     }
 
     /// Tracks a complete registration event with custom parameters.
     pub fn track_complete_registration_with_params(&self, params: EventParameters) -> Result<(), FunnelMobError> {
-        self.track_event_with_params(standard_events::FM_COMPLETE_REGISTRATION, params)
+        self.track_event_with_params(standard_events::COMPLETE_REGISTRATION, params)
     }
 
     /// Tracks a contact event.
     pub fn track_contact(&self) -> Result<(), FunnelMobError> {
-        self.track_event(standard_events::FM_CONTACT)
+        self.track_event(standard_events::CONTACT)
     }
 
     /// Tracks a contact event with custom parameters.
     pub fn track_contact_with_params(&self, params: EventParameters) -> Result<(), FunnelMobError> {
-        self.track_event_with_params(standard_events::FM_CONTACT, params)
+        self.track_event_with_params(standard_events::CONTACT, params)
     }
 
     /// Tracks a schedule event.
     pub fn track_schedule(&self) -> Result<(), FunnelMobError> {
-        self.track_event(standard_events::FM_SCHEDULE)
+        self.track_event(standard_events::SCHEDULE)
     }
 
     /// Tracks a schedule event with custom parameters.
     pub fn track_schedule_with_params(&self, params: EventParameters) -> Result<(), FunnelMobError> {
-        self.track_event_with_params(standard_events::FM_SCHEDULE, params)
+        self.track_event_with_params(standard_events::SCHEDULE, params)
     }
 
     /// Tracks a find location event.
     pub fn track_find_location(&self) -> Result<(), FunnelMobError> {
-        self.track_event(standard_events::FM_FIND_LOCATION)
+        self.track_event(standard_events::FIND_LOCATION)
     }
 
     /// Tracks a find location event with custom parameters.
     pub fn track_find_location_with_params(&self, params: EventParameters) -> Result<(), FunnelMobError> {
-        self.track_event_with_params(standard_events::FM_FIND_LOCATION, params)
+        self.track_event_with_params(standard_events::FIND_LOCATION, params)
     }
 
     /// Tracks a customize product event.
     pub fn track_customize_product(&self) -> Result<(), FunnelMobError> {
-        self.track_event(standard_events::FM_CUSTOMIZE_PRODUCT)
+        self.track_event(standard_events::CUSTOMIZE_PRODUCT)
     }
 
     /// Tracks a customize product event with custom parameters.
     pub fn track_customize_product_with_params(&self, params: EventParameters) -> Result<(), FunnelMobError> {
-        self.track_event_with_params(standard_events::FM_CUSTOMIZE_PRODUCT, params)
+        self.track_event_with_params(standard_events::CUSTOMIZE_PRODUCT, params)
     }
 
     /// Tracks a donation event with revenue.
     pub fn track_donate(&self, amount: f64, currency: &str) -> Result<(), FunnelMobError> {
-        self.track_event_with_revenue(standard_events::FM_DONATE, Revenue::new(amount, currency)?)
+        self.track_event_with_revenue(standard_events::DONATE, Revenue::new(amount, currency)?)
     }
 
     /// Tracks a donation event with revenue and custom parameters.
     pub fn track_donate_with_params(&self, amount: f64, currency: &str, params: EventParameters) -> Result<(), FunnelMobError> {
-        self.track_event_with_revenue_and_params(standard_events::FM_DONATE, Revenue::new(amount, currency)?, params)
+        self.track_event_with_revenue_and_params(standard_events::DONATE, Revenue::new(amount, currency)?, params)
     }
 
     /// Tracks a submit application event.
     pub fn track_submit_application(&self) -> Result<(), FunnelMobError> {
-        self.track_event(standard_events::FM_SUBMIT_APPLICATION)
+        self.track_event(standard_events::SUBMIT_APPLICATION)
     }
 
     /// Tracks a submit application event with custom parameters.
     pub fn track_submit_application_with_params(&self, params: EventParameters) -> Result<(), FunnelMobError> {
-        self.track_event_with_params(standard_events::FM_SUBMIT_APPLICATION, params)
+        self.track_event_with_params(standard_events::SUBMIT_APPLICATION, params)
     }
 
     /// Tracks an application approval event.
     pub fn track_application_approval(&self) -> Result<(), FunnelMobError> {
-        self.track_event(standard_events::FM_APPLICATION_APPROVAL)
+        self.track_event(standard_events::APPLICATION_APPROVAL)
     }
 
     /// Tracks an application approval event with custom parameters.
     pub fn track_application_approval_with_params(&self, params: EventParameters) -> Result<(), FunnelMobError> {
-        self.track_event_with_params(standard_events::FM_APPLICATION_APPROVAL, params)
+        self.track_event_with_params(standard_events::APPLICATION_APPROVAL, params)
     }
 
     /// Tracks a download event.
     pub fn track_download(&self) -> Result<(), FunnelMobError> {
-        self.track_event(standard_events::FM_DOWNLOAD)
+        self.track_event(standard_events::DOWNLOAD)
     }
 
     /// Tracks a download event with custom parameters.
     pub fn track_download_with_params(&self, params: EventParameters) -> Result<(), FunnelMobError> {
-        self.track_event_with_params(standard_events::FM_DOWNLOAD, params)
+        self.track_event_with_params(standard_events::DOWNLOAD, params)
     }
 
     /// Tracks a form submission event.
     pub fn track_submit_form(&self) -> Result<(), FunnelMobError> {
-        self.track_event(standard_events::FM_SUBMIT_FORM)
+        self.track_event(standard_events::SUBMIT_FORM)
     }
 
     /// Tracks a form submission event with custom parameters.
     pub fn track_submit_form_with_params(&self, params: EventParameters) -> Result<(), FunnelMobError> {
-        self.track_event_with_params(standard_events::FM_SUBMIT_FORM, params)
+        self.track_event_with_params(standard_events::SUBMIT_FORM, params)
     }
 
     /// Tracks a start trial event with revenue.
     pub fn track_start_trial(&self, amount: f64, currency: &str) -> Result<(), FunnelMobError> {
-        self.track_event_with_revenue(standard_events::FM_START_TRIAL, Revenue::new(amount, currency)?)
+        self.track_event_with_revenue(standard_events::START_TRIAL, Revenue::new(amount, currency)?)
     }
 
     /// Tracks a start trial event with revenue and custom parameters.
     pub fn track_start_trial_with_params(&self, amount: f64, currency: &str, params: EventParameters) -> Result<(), FunnelMobError> {
-        self.track_event_with_revenue_and_params(standard_events::FM_START_TRIAL, Revenue::new(amount, currency)?, params)
+        self.track_event_with_revenue_and_params(standard_events::START_TRIAL, Revenue::new(amount, currency)?, params)
     }
 
     /// Tracks a subscribe event with revenue.
     pub fn track_subscribe(&self, amount: f64, currency: &str) -> Result<(), FunnelMobError> {
-        self.track_event_with_revenue(standard_events::FM_SUBSCRIBE, Revenue::new(amount, currency)?)
+        self.track_event_with_revenue(standard_events::SUBSCRIBE, Revenue::new(amount, currency)?)
     }
 
     /// Tracks a subscribe event with revenue and custom parameters.
     pub fn track_subscribe_with_params(&self, amount: f64, currency: &str, params: EventParameters) -> Result<(), FunnelMobError> {
-        self.track_event_with_revenue_and_params(standard_events::FM_SUBSCRIBE, Revenue::new(amount, currency)?, params)
+        self.track_event_with_revenue_and_params(standard_events::SUBSCRIBE, Revenue::new(amount, currency)?, params)
     }
 
     /// Tracks an achieve level event.
     pub fn track_achieve_level(&self) -> Result<(), FunnelMobError> {
-        self.track_event(standard_events::FM_ACHIEVE_LEVEL)
+        self.track_event(standard_events::ACHIEVE_LEVEL)
     }
 
     /// Tracks an achieve level event with custom parameters.
     pub fn track_achieve_level_with_params(&self, params: EventParameters) -> Result<(), FunnelMobError> {
-        self.track_event_with_params(standard_events::FM_ACHIEVE_LEVEL, params)
+        self.track_event_with_params(standard_events::ACHIEVE_LEVEL, params)
     }
 
     /// Tracks an unlock achievement event.
     pub fn track_unlock_achievement(&self) -> Result<(), FunnelMobError> {
-        self.track_event(standard_events::FM_UNLOCK_ACHIEVEMENT)
+        self.track_event(standard_events::UNLOCK_ACHIEVEMENT)
     }
 
     /// Tracks an unlock achievement event with custom parameters.
     pub fn track_unlock_achievement_with_params(&self, params: EventParameters) -> Result<(), FunnelMobError> {
-        self.track_event_with_params(standard_events::FM_UNLOCK_ACHIEVEMENT, params)
+        self.track_event_with_params(standard_events::UNLOCK_ACHIEVEMENT, params)
     }
 
     /// Tracks a spent credits event.
     pub fn track_spent_credits(&self, value: f64) -> Result<(), FunnelMobError> {
         let params = EventParameters::new().set("value", value);
-        self.track_event_with_params(standard_events::FM_SPEND_CREDITS, params)
+        self.track_event_with_params(standard_events::SPENT_CREDITS, params)
     }
 
     /// Tracks a spent credits event with custom parameters.
     pub fn track_spent_credits_with_params(&self, value: f64, params: EventParameters) -> Result<(), FunnelMobError> {
         let params = params.set("value", value);
-        self.track_event_with_params(standard_events::FM_SPEND_CREDITS, params)
+        self.track_event_with_params(standard_events::SPENT_CREDITS, params)
     }
 
     /// Tracks a rate event.
     pub fn track_rate(&self) -> Result<(), FunnelMobError> {
-        self.track_event(standard_events::FM_RATE)
+        self.track_event(standard_events::RATE)
     }
 
     /// Tracks a rate event with custom parameters.
     pub fn track_rate_with_params(&self, params: EventParameters) -> Result<(), FunnelMobError> {
-        self.track_event_with_params(standard_events::FM_RATE, params)
+        self.track_event_with_params(standard_events::RATE, params)
     }
 
     /// Tracks a complete tutorial event.
     pub fn track_complete_tutorial(&self) -> Result<(), FunnelMobError> {
-        self.track_event(standard_events::FM_COMPLETE_TUTORIAL)
+        self.track_event(standard_events::COMPLETE_TUTORIAL)
     }
 
     /// Tracks a complete tutorial event with custom parameters.
     pub fn track_complete_tutorial_with_params(&self, params: EventParameters) -> Result<(), FunnelMobError> {
-        self.track_event_with_params(standard_events::FM_COMPLETE_TUTORIAL, params)
+        self.track_event_with_params(standard_events::COMPLETE_TUTORIAL, params)
     }
 
     /// Tracks an activate app event (first launch after install).
     pub fn track_activate_app(&self) -> Result<(), FunnelMobError> {
-        self.track_event(standard_events::FM_ACTIVATE_APP)
+        self.track_event(standard_events::ACTIVATE_APP)
     }
 
     /// Tracks an activate app event with custom parameters.
     pub fn track_activate_app_with_params(&self, params: EventParameters) -> Result<(), FunnelMobError> {
-        self.track_event_with_params(standard_events::FM_ACTIVATE_APP, params)
+        self.track_event_with_params(standard_events::ACTIVATE_APP, params)
     }
 
     /// Tracks an in-app ad click event.
     pub fn track_in_app_ad_click(&self) -> Result<(), FunnelMobError> {
-        self.track_event(standard_events::FM_IN_APP_AD_CLICK)
+        self.track_event(standard_events::IN_APP_AD_CLICK)
     }
 
     /// Tracks an in-app ad click event with custom parameters.
     pub fn track_in_app_ad_click_with_params(&self, params: EventParameters) -> Result<(), FunnelMobError> {
-        self.track_event_with_params(standard_events::FM_IN_APP_AD_CLICK, params)
+        self.track_event_with_params(standard_events::IN_APP_AD_CLICK, params)
     }
 
     /// Tracks an in-app ad impression event.
     pub fn track_in_app_ad_impression(&self) -> Result<(), FunnelMobError> {
-        self.track_event(standard_events::FM_IN_APP_AD_IMPRESSION)
+        self.track_event(standard_events::IN_APP_AD_IMPRESSION)
     }
 
     /// Tracks an in-app ad impression event with custom parameters.
     pub fn track_in_app_ad_impression_with_params(&self, params: EventParameters) -> Result<(), FunnelMobError> {
-        self.track_event_with_params(standard_events::FM_IN_APP_AD_IMPRESSION, params)
+        self.track_event_with_params(standard_events::IN_APP_AD_IMPRESSION, params)
     }
 
     /// Flushes queued events to the server.

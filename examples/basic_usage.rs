@@ -31,7 +31,7 @@ fn main() {
     println!("\nTracked: app_launched");
 
     // Track a standard registration event
-    sdk.track_event(standard_events::FM_REGISTRATION)
+    sdk.track_event(standard_events::COMPLETE_REGISTRATION)
         .expect("Failed to track registration");
     println!("Tracked: fm_registration");
 
@@ -48,7 +48,7 @@ fn main() {
 
     // Track a purchase event with revenue
     let revenue = Revenue::usd(29.99).expect("Invalid revenue");
-    sdk.track_event_with_revenue(standard_events::FM_PURCHASE, revenue)
+    sdk.track_event_with_revenue(standard_events::PURCHASE, revenue)
         .expect("Failed to track purchase");
     println!("Tracked: fm_purchase with $29.99 USD");
 
@@ -60,7 +60,7 @@ fn main() {
         .set("auto_renew", true);
 
     sdk.track_event_with_revenue_and_params(
-        standard_events::FM_SUBSCRIBE,
+        standard_events::SUBSCRIBE,
         subscription_revenue,
         subscription_params,
     )

@@ -11,7 +11,9 @@ use crate::configuration::Configuration;
 use crate::error::FunnelMobError;
 use crate::internal::event::EventBatch;
 use crate::internal::logger::Logger;
-use crate::internal::network_client::{EventBatchResponse, NetworkErrorKind};
+use crate::internal::network_client::{
+    EventBatchResponse, NetworkErrorKind, SessionRequest, SessionResponse,
+};
 
 /// Async HTTP client for the FunnelMob API.
 pub struct AsyncNetworkClient {
@@ -47,6 +49,15 @@ impl AsyncNetworkClient {
     pub async fn send_events(&self, batch: &EventBatch) -> Result<EventBatchResponse, FunnelMobError> {
         let url = format!("{}/events", self.base_url);
         self.post_with_retry(&url, batch).await
+    }
+
+    /// Registers a new session asynchronously.
+    pub async fn register_session(
+        &self,
+        request: &SessionRequest,
+    ) -> Result<SessionResponse, FunnelMobError> {
+        let url = format!("{}/session", self.base_url);
+        self.post_with_retry(&url, request).await
     }
 
     /// Fetches remote config from the API asynchronously.

@@ -261,6 +261,10 @@ impl FunnelMob {
     /// consent required by applicable law for the data the SDK will collect
     /// and transmit.
     ///
+    /// `start` is non-blocking: the initial `/v1/session` POST is dispatched
+    /// to a background thread (or tokio task under `feature = "async"`) so
+    /// callers on the main thread aren't held up by network latency.
+    ///
     /// Calling `start` more than once is a no-op.
     pub fn start(&self) {
         if self.started.swap(true, Ordering::SeqCst) {
@@ -271,13 +275,12 @@ impl FunnelMob {
         self.start_flush_timer();
         self.fetch_remote_config_background();
 
-        // Fire the first /v1/session call carrying any identifiers the host
-        // supplied before start(). On failure this is silent — host can
-        // recover with flush_identifiers() later.
-        if let Err(e) = self.send_session_now(true) {
-            self.logger
-                .warn(&format!("Initial /v1/session POST failed: {}", e));
-        }
+        // Dispatch the first /v1/session call carrying any identifiers the
+        // host supplied before start(). Non-blocking — runs on a background
+        // thread (or tokio task with the async feature). Failures are logged
+        // there; the dirty bit is restored so a follow-up flush_identifiers()
+        // / foreground hook re-fires.
+        self.send_session_in_background(true);
 
         // Fire app launch event automatically. Hosts that need first-session
         // semantics should call track_event_with_params with their own gate.
@@ -287,26 +290,69 @@ impl FunnelMob {
         }
     }
 
-    /// Build and send a `/v1/session` request synchronously, with whatever
-    /// identifiers are currently in memory. Used by `start()` for the
-    /// first-session call and by `flush_identifiers()` for re-fires.
-    /// Clears the dirty bit on success; restores it on failure.
-    fn send_session_now(&self, is_first_session: bool) -> Result<(), FunnelMobError> {
+    /// Snapshot the current identifier set + dirty bit, then dispatch a
+    /// `/v1/session` POST in the background. Caller is not blocked on the
+    /// network round-trip.
+    ///
+    /// On success, the dirty bit stays cleared. On failure, the dirty bit is
+    /// restored so a foreground hook / next setter re-fires.
+    fn send_session_in_background(&self, is_first_session: bool) {
         let was_dirty = self.identifier_dirty.swap(false, Ordering::SeqCst);
         let request = self.build_session_request(is_first_session);
-        match self.network.register_session(&request) {
-            Ok(_) => {
-                self.logger.debug("/v1/session POST succeeded");
-                Ok(())
-            }
-            Err(e) => {
-                // Restore dirty so a follow-up attempt re-fires.
-                if was_dirty {
-                    self.identifier_dirty.store(true, Ordering::SeqCst);
-                }
-                Err(e)
+        let identifier_dirty = Arc::clone(&self.identifier_dirty);
+        let logger = self.logger.clone();
+
+        #[cfg(feature = "async")]
+        {
+            // Prefer the async client when the runtime is available so we
+            // don't burn a thread per session POST.
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                let config = self.config.clone();
+                let task_logger = logger.clone();
+                handle.spawn(async move {
+                    let client = match internal::async_network_client::AsyncNetworkClient::new(
+                        &config,
+                        Logger::new(config.log_level()),
+                    ) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            task_logger.warn(&format!(
+                                "Failed to create async network client for /v1/session: {}",
+                                e
+                            ));
+                            if was_dirty {
+                                identifier_dirty.store(true, Ordering::SeqCst);
+                            }
+                            return;
+                        }
+                    };
+                    match client.register_session(&request).await {
+                        Ok(_) => task_logger.debug("/v1/session POST succeeded"),
+                        Err(e) => {
+                            task_logger
+                                .warn(&format!("/v1/session POST failed: {}", e));
+                            if was_dirty {
+                                identifier_dirty.store(true, Ordering::SeqCst);
+                            }
+                        }
+                    }
+                });
+                return;
             }
         }
+
+        // Sync fallback: spawn a plain OS thread so start() / setters return
+        // immediately. Matches the pattern used by fetch_remote_config_background.
+        let network = self.network.clone();
+        thread::spawn(move || match network.register_session(&request) {
+            Ok(_) => logger.debug("/v1/session POST succeeded"),
+            Err(e) => {
+                logger.warn(&format!("/v1/session POST failed: {}", e));
+                if was_dirty {
+                    identifier_dirty.store(true, Ordering::SeqCst);
+                }
+            }
+        });
     }
 
     /// Snapshot the current identifier set into a `SessionRequest`.
@@ -384,7 +430,8 @@ impl FunnelMob {
     }
 
     /// Bypass the debounce and immediately re-fire `/v1/session` with the
-    /// current identifier set if dirty. Synchronous, blocking call.
+    /// current identifier set if dirty. Non-blocking — the POST runs on a
+    /// background thread (or tokio task under `feature = "async"`).
     /// No-op if not started or not dirty.
     pub fn flush_identifiers(&self) {
         if !self.started.load(Ordering::SeqCst) {
@@ -393,10 +440,7 @@ impl FunnelMob {
         if !self.identifier_dirty.load(Ordering::SeqCst) {
             return;
         }
-        if let Err(e) = self.send_session_now(false) {
-            self.logger
-                .warn(&format!("flush_identifiers POST failed: {}", e));
-        }
+        self.send_session_in_background(false);
     }
 
     fn mark_identifier_dirty(&self) {

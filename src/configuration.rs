@@ -40,6 +40,9 @@ const MIN_BATCH_SIZE: u32 = 1;
 /// Maximum batch size.
 const MAX_BATCH_SIZE: u32 = 100;
 
+/// Default for [`ConfigurationBuilder::auto_start`].
+const DEFAULT_AUTO_START: bool = true;
+
 /// Configuration for the FunnelMob SDK.
 ///
 /// Use [`Configuration::builder`] to create a new configuration with the builder pattern.
@@ -66,6 +69,7 @@ pub struct Configuration {
     pub(crate) log_level: LogLevel,
     pub(crate) flush_interval_ms: u32,
     pub(crate) max_batch_size: u32,
+    pub(crate) auto_start: bool,
 }
 
 impl Configuration {
@@ -134,6 +138,14 @@ impl Configuration {
     pub fn max_batch_size(&self) -> u32 {
         self.max_batch_size
     }
+
+    /// Returns whether the SDK starts automatically on [`crate::FunnelMob::new`].
+    ///
+    /// When `false`, the host must call [`crate::FunnelMob::start`] explicitly
+    /// — typically after obtaining user consent.
+    pub fn auto_start(&self) -> bool {
+        self.auto_start
+    }
 }
 
 /// Builder for creating a [`Configuration`].
@@ -158,6 +170,7 @@ pub struct ConfigurationBuilder {
     log_level: LogLevel,
     flush_interval_ms: u32,
     max_batch_size: u32,
+    auto_start: bool,
 }
 
 impl ConfigurationBuilder {
@@ -170,6 +183,7 @@ impl ConfigurationBuilder {
             log_level: LogLevel::default(),
             flush_interval_ms: DEFAULT_FLUSH_INTERVAL_MS,
             max_batch_size: DEFAULT_MAX_BATCH_SIZE,
+            auto_start: DEFAULT_AUTO_START,
         }
     }
 
@@ -223,6 +237,24 @@ impl ConfigurationBuilder {
         self
     }
 
+    /// Configures whether the SDK starts automatically on
+    /// [`crate::FunnelMob::new`].
+    ///
+    /// When `true` (the default), `new` immediately starts the flush timer,
+    /// fetches remote config, and fires the `ActivateApp` event. When
+    /// `false`, those side effects are deferred until [`crate::FunnelMob::start`]
+    /// is called — and any `track_event*` calls before `start` are dropped.
+    /// Use `false` to gate the SDK on user consent (GDPR, CCPA, etc.).
+    ///
+    /// By calling [`crate::FunnelMob::start`] you represent that you have
+    /// obtained any user consent required by applicable law.
+    ///
+    /// Default: `true`
+    pub fn auto_start(mut self, enabled: bool) -> Self {
+        self.auto_start = enabled;
+        self
+    }
+
     /// Builds the configuration.
     ///
     /// # Errors
@@ -254,6 +286,7 @@ impl ConfigurationBuilder {
             log_level: self.log_level,
             flush_interval_ms: self.flush_interval_ms,
             max_batch_size: self.max_batch_size,
+            auto_start: self.auto_start,
         })
     }
 }

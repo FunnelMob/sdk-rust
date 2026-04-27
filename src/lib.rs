@@ -126,10 +126,31 @@ pub struct FunnelMob {
     async_network: internal::async_network_client::AsyncNetworkClient,
     logger: Logger,
     enabled: AtomicBool,
+    started: AtomicBool,
     flush_handle: RwLock<Option<thread::JoinHandle<()>>>,
     shutdown: Arc<AtomicBool>,
     remote_config: Arc<RwLock<Option<HashMap<String, serde_json::Value>>>>,
     config_callbacks: Arc<Mutex<Vec<Box<dyn Fn(&HashMap<String, serde_json::Value>) + Send + Sync + 'static>>>>,
+
+    // ─── User identifiers ─────────────────────────────────────────────────
+    // In-memory only — never persisted. Hosts re-supply on each launch.
+    // For desktop/Tauri/Electron the SDK never reads ad IDs itself;
+    // setters exist for cross-platform symmetry and are no-ops on truly
+    // desktop platforms.
+    identifiers: Mutex<UserIdentifiers>,
+    identifier_dirty: Arc<AtomicBool>,
+    /// Wakeup signal for the debounce task. Set on every setter call.
+    #[cfg(feature = "async")]
+    identifier_notify: Arc<tokio::sync::Notify>,
+}
+
+#[derive(Debug, Default, Clone)]
+struct UserIdentifiers {
+    idfa: Option<String>,
+    gaid: Option<String>,
+    hashed_email: Option<String>,
+    hashed_phone: Option<String>,
+    hashed_external_id: Option<String>,
 }
 
 impl FunnelMob {
@@ -194,6 +215,8 @@ impl FunnelMob {
         let config_callbacks: Arc<Mutex<Vec<Box<dyn Fn(&HashMap<String, serde_json::Value>) + Send + Sync + 'static>>>> =
             Arc::new(Mutex::new(Vec::new()));
 
+        let auto_start = config.auto_start();
+
         let sdk = Self {
             config,
             device_info,
@@ -204,27 +227,190 @@ impl FunnelMob {
             async_network,
             logger,
             enabled: AtomicBool::new(true),
+            started: AtomicBool::new(false),
             flush_handle: RwLock::new(None),
             shutdown,
             remote_config,
             config_callbacks,
+            identifiers: Mutex::new(UserIdentifiers::default()),
+            identifier_dirty: Arc::new(AtomicBool::new(false)),
+            #[cfg(feature = "async")]
+            identifier_notify: Arc::new(tokio::sync::Notify::new()),
         };
 
-        // Start flush timer
-        sdk.start_flush_timer();
-
-        // Fetch remote config in background
-        sdk.fetch_remote_config_background();
-
-        // Fire app launch event automatically. Hosts that need first-session
-        // semantics should call track_event_with_params with their own gate.
-        if let Err(e) = sdk.track_event(standard_events::ACTIVATE_APP) {
+        if auto_start {
+            sdk.start();
+        } else {
             sdk.logger
-                .warn(&format!("Failed to fire ActivateApp on init: {}", e));
+                .info("autoStart disabled — call FunnelMob::start when ready");
         }
 
         sdk.logger.info("FunnelMob SDK initialized");
         Ok(sdk)
+    }
+
+    /// Starts the SDK's active components: flush timer, remote config fetch,
+    /// and the automatic `ActivateApp` event.
+    ///
+    /// Called automatically by [`FunnelMob::new`] when
+    /// [`Configuration::auto_start`] is `true` (the default). When
+    /// `auto_start` is `false`, the host must call `start` explicitly —
+    /// typically after obtaining user consent (GDPR, CCPA, etc.).
+    ///
+    /// By calling `start`, you represent that you have obtained any user
+    /// consent required by applicable law for the data the SDK will collect
+    /// and transmit.
+    ///
+    /// Calling `start` more than once is a no-op.
+    pub fn start(&self) {
+        if self.started.swap(true, Ordering::SeqCst) {
+            self.logger.warn("FunnelMob already started");
+            return;
+        }
+
+        self.start_flush_timer();
+        self.fetch_remote_config_background();
+
+        // Fire the first /v1/session call carrying any identifiers the host
+        // supplied before start(). On failure this is silent — host can
+        // recover with flush_identifiers() later.
+        if let Err(e) = self.send_session_now(true) {
+            self.logger
+                .warn(&format!("Initial /v1/session POST failed: {}", e));
+        }
+
+        // Fire app launch event automatically. Hosts that need first-session
+        // semantics should call track_event_with_params with their own gate.
+        if let Err(e) = self.track_event(standard_events::ACTIVATE_APP) {
+            self.logger
+                .warn(&format!("Failed to fire ActivateApp on start: {}", e));
+        }
+    }
+
+    /// Build and send a `/v1/session` request synchronously, with whatever
+    /// identifiers are currently in memory. Used by `start()` for the
+    /// first-session call and by `flush_identifiers()` for re-fires.
+    /// Clears the dirty bit on success; restores it on failure.
+    fn send_session_now(&self, is_first_session: bool) -> Result<(), FunnelMobError> {
+        let was_dirty = self.identifier_dirty.swap(false, Ordering::SeqCst);
+        let request = self.build_session_request(is_first_session);
+        match self.network.register_session(&request) {
+            Ok(_) => {
+                self.logger.debug("/v1/session POST succeeded");
+                Ok(())
+            }
+            Err(e) => {
+                // Restore dirty so a follow-up attempt re-fires.
+                if was_dirty {
+                    self.identifier_dirty.store(true, Ordering::SeqCst);
+                }
+                Err(e)
+            }
+        }
+    }
+
+    /// Snapshot the current identifier set into a `SessionRequest`.
+    /// Shared between the first-session POST in `start()` and the
+    /// debounced re-fire path.
+    fn build_session_request(&self, is_first_session: bool) -> internal::network_client::SessionRequest {
+        let ids = self
+            .identifiers
+            .lock()
+            .map(|g| g.clone())
+            .unwrap_or_default();
+        internal::network_client::SessionRequest {
+            platform: self.config.platform().to_string(),
+            device_id: self.device_info.device_id.clone(),
+            session_id: self.session_id.to_string(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            is_first_session: Some(is_first_session),
+            idfa: ids.idfa,
+            gaid: ids.gaid,
+            // _fbp / _fbc / att_status are platform-specific; desktop
+            // hosts have no source for them. Always None on Rust.
+            fbp: None,
+            fbc: None,
+            email_sha256: ids.hashed_email,
+            phone_sha256: ids.hashed_phone,
+            external_id_sha256: ids.hashed_external_id,
+            att_status: None,
+        }
+    }
+
+    // ─── User identifier setters ──────────────────────────────────────────
+
+    /// Set the device's IDFA. Exposed for cross-platform API symmetry —
+    /// no-op on truly desktop targets where IDFA doesn't exist. A
+    /// Tauri/Electron host on iOS may call this after ATT consent.
+    pub fn set_idfa(&self, idfa: Option<String>) {
+        if let Ok(mut g) = self.identifiers.lock() {
+            g.idfa = idfa;
+        }
+        self.mark_identifier_dirty();
+    }
+
+    /// Set the device's Google Advertising ID. Same cross-platform
+    /// rationale as `set_idfa`.
+    pub fn set_gaid(&self, gaid: Option<String>) {
+        if let Ok(mut g) = self.identifiers.lock() {
+            g.gaid = gaid;
+        }
+        self.mark_identifier_dirty();
+    }
+
+    /// Set the SHA256-hex hash of the user's email (lowercase + trim,
+    /// then SHA256). Pre-hashed by the host — the SDK never sees raw PII.
+    pub fn set_hashed_email(&self, sha256: Option<String>) {
+        if let Ok(mut g) = self.identifiers.lock() {
+            g.hashed_email = sha256;
+        }
+        self.mark_identifier_dirty();
+    }
+
+    /// Set the SHA256-hex hash of the user's phone (E.164 format pre-hash).
+    pub fn set_hashed_phone(&self, sha256: Option<String>) {
+        if let Ok(mut g) = self.identifiers.lock() {
+            g.hashed_phone = sha256;
+        }
+        self.mark_identifier_dirty();
+    }
+
+    /// Set the SHA256-hex hash of an external user identifier.
+    pub fn set_hashed_external_id(&self, sha256: Option<String>) {
+        if let Ok(mut g) = self.identifiers.lock() {
+            g.hashed_external_id = sha256;
+        }
+        self.mark_identifier_dirty();
+    }
+
+    /// Bypass the debounce and immediately re-fire `/v1/session` with the
+    /// current identifier set if dirty. Synchronous, blocking call.
+    /// No-op if not started or not dirty.
+    pub fn flush_identifiers(&self) {
+        if !self.started.load(Ordering::SeqCst) {
+            return;
+        }
+        if !self.identifier_dirty.load(Ordering::SeqCst) {
+            return;
+        }
+        if let Err(e) = self.send_session_now(false) {
+            self.logger
+                .warn(&format!("flush_identifiers POST failed: {}", e));
+        }
+    }
+
+    fn mark_identifier_dirty(&self) {
+        self.identifier_dirty.store(true, Ordering::SeqCst);
+        // Wake the async debounce task if it's running. Sync builds rely
+        // on flush_identifiers() / next-setter / app-foreground hooks
+        // (host-driven) to push the change.
+        #[cfg(feature = "async")]
+        self.identifier_notify.notify_one();
+    }
+
+    /// Returns whether the SDK has been started.
+    pub fn is_started(&self) -> bool {
+        self.started.load(Ordering::SeqCst)
     }
 
     /// Initializes the global singleton instance.
@@ -250,6 +436,12 @@ impl FunnelMob {
             return Ok(());
         }
 
+        if !self.is_started() {
+            self.logger
+                .debug(&format!("FunnelMob not started, ignoring event: {}", event_name));
+            return Ok(());
+        }
+
         validate_event_name(event_name)?;
 
         let event = internal::event::Event::new(event_name);
@@ -268,6 +460,12 @@ impl FunnelMob {
         revenue: Revenue,
     ) -> Result<(), FunnelMobError> {
         if !self.is_enabled() {
+            return Ok(());
+        }
+
+        if !self.is_started() {
+            self.logger
+                .debug(&format!("FunnelMob not started, ignoring event: {}", event_name));
             return Ok(());
         }
 
@@ -296,6 +494,12 @@ impl FunnelMob {
             return Ok(());
         }
 
+        if !self.is_started() {
+            self.logger
+                .debug(&format!("FunnelMob not started, ignoring event: {}", event_name));
+            return Ok(());
+        }
+
         validate_event_name(event_name)?;
 
         let event = if let Some(map) = params.into_map() {
@@ -320,6 +524,12 @@ impl FunnelMob {
         params: EventParameters,
     ) -> Result<(), FunnelMobError> {
         if !self.is_enabled() {
+            return Ok(());
+        }
+
+        if !self.is_started() {
+            self.logger
+                .debug(&format!("FunnelMob not started, ignoring event: {}", event_name));
             return Ok(());
         }
 
@@ -888,6 +1098,12 @@ impl FunnelMob {
             return Ok(());
         }
 
+        if !self.is_started() {
+            self.logger
+                .debug(&format!("FunnelMob not started, ignoring event: {}", event_name));
+            return Ok(());
+        }
+
         validate_event_name(event_name)?;
 
         let event = internal::event::Event::new(event_name);
@@ -906,6 +1122,12 @@ impl FunnelMob {
         revenue: Revenue,
     ) -> Result<(), FunnelMobError> {
         if !self.is_enabled() {
+            return Ok(());
+        }
+
+        if !self.is_started() {
+            self.logger
+                .debug(&format!("FunnelMob not started, ignoring event: {}", event_name));
             return Ok(());
         }
 
@@ -934,6 +1156,12 @@ impl FunnelMob {
             return Ok(());
         }
 
+        if !self.is_started() {
+            self.logger
+                .debug(&format!("FunnelMob not started, ignoring event: {}", event_name));
+            return Ok(());
+        }
+
         validate_event_name(event_name)?;
 
         let event = if let Some(map) = params.into_map() {
@@ -958,6 +1186,12 @@ impl FunnelMob {
         params: EventParameters,
     ) -> Result<(), FunnelMobError> {
         if !self.is_enabled() {
+            return Ok(());
+        }
+
+        if !self.is_started() {
+            self.logger
+                .debug(&format!("FunnelMob not started, ignoring event: {}", event_name));
             return Ok(());
         }
 

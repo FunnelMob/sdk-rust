@@ -45,6 +45,31 @@ pub struct SessionRequest {
     pub timestamp: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_first_session: Option<bool>,
+    /// Apple Advertising Identifier (iOS only). Always None on desktop.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub idfa: Option<String>,
+    /// Google Advertising ID (Android only). Always None on desktop.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gaid: Option<String>,
+    /// Meta browser cookie `_fbp` (web only). Always None on desktop.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fbp: Option<String>,
+    /// Meta click cookie `_fbc` (web only). Always None on desktop.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fbc: Option<String>,
+    /// SHA256-hex of normalized email (lowercase + trim, then SHA256).
+    /// The SDK never sees raw PII.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email_sha256: Option<String>,
+    /// SHA256-hex of normalized phone (E.164 pre-hash).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub phone_sha256: Option<String>,
+    /// SHA256-hex of an external user identifier (CRM ID, auth user ID).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external_id_sha256: Option<String>,
+    /// iOS ATT status. Always None on desktop.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub att_status: Option<String>,
 }
 
 /// Response from the session API.

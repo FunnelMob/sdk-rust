@@ -144,7 +144,7 @@ sdk.track_donate(10.0, "USD")?;
 sdk.track_spent_credits(100.0)?;
 ```
 
-See [docs/specs/sdk_events_reference.md](../docs/specs/sdk_events_reference.md) for the full list of 29 typed methods with platform support details.
+See [docs/reference/sdk_events_reference.md](../docs/reference/sdk_events_reference.md) for the full list of 29 typed methods with platform support details.
 
 ### Using Constants
 

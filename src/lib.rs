@@ -370,6 +370,7 @@ impl FunnelMob {
             session_id: self.session_id.to_string(),
             timestamp: chrono::Utc::now().to_rfc3339(),
             is_first_session: Some(is_first_session),
+            context: Some(self.device_info.to_context()),
             idfa: ids.idfa,
             gaid: ids.gaid,
             // _fbp / _fbc / att_status are platform-specific; desktop

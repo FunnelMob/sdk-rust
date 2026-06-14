@@ -51,6 +51,20 @@ impl DeviceInfo {
         })
     }
 
+    /// Converts collected host details into the `/v1/session` context payload.
+    pub fn to_context(&self) -> crate::internal::network_client::DeviceContext {
+        crate::internal::network_client::DeviceContext {
+            app_version: None,
+            os_name: Some(self.os_name.clone()),
+            os_version: Some(self.os_version.clone()),
+            device_model: None,
+            locale: self.locale.clone(),
+            timezone: self.timezone.clone(),
+            screen_width: None,
+            screen_height: None,
+        }
+    }
+
     /// Gets the stored device ID or creates a new one.
     fn get_or_create_device_id(storage_id: &str) -> Result<String, FunnelMobError> {
         let path = Self::device_id_path(storage_id)?;
@@ -277,5 +291,26 @@ mod tests {
             assert!(!info.device_id.is_empty());
             assert!(!info.os_name.is_empty());
         }
+    }
+
+    #[test]
+    fn test_to_context_omits_device_model_without_true_model() {
+        let info = DeviceInfo {
+            device_id: "device".to_string(),
+            os_name: "Linux".to_string(),
+            os_version: "6.1".to_string(),
+            hostname: Some("host".to_string()),
+            locale: Some("en_US".to_string()),
+            timezone: Some("UTC".to_string()),
+        };
+
+        let context = info.to_context();
+        assert_eq!(context.os_name.as_deref(), Some("Linux"));
+        assert_eq!(context.os_version.as_deref(), Some("6.1"));
+        assert_eq!(context.device_model, None);
+        assert_eq!(context.locale.as_deref(), Some("en_US"));
+        assert_eq!(context.timezone.as_deref(), Some("UTC"));
+        assert_eq!(context.screen_width, None);
+        assert_eq!(context.screen_height, None);
     }
 }

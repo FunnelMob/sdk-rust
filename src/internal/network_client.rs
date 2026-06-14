@@ -45,6 +45,9 @@ pub struct SessionRequest {
     pub timestamp: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_first_session: Option<bool>,
+    /// Device context collected by the SDK.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<DeviceContext>,
     /// Apple Advertising Identifier (iOS only). Always None on desktop.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub idfa: Option<String>,
@@ -70,6 +73,27 @@ pub struct SessionRequest {
     /// iOS ATT status. Always None on desktop.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub att_status: Option<String>,
+}
+
+/// Device context for session requests.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DeviceContext {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub os_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub os_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device_model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub locale: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timezone: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub screen_width: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub screen_height: Option<i32>,
 }
 
 /// Response from the session API.
@@ -429,6 +453,42 @@ fn rand_float() -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn session_request_serializes_device_context() {
+        let request = SessionRequest {
+            platform: "rust".to_string(),
+            device_id: "device-1".to_string(),
+            session_id: "session-1".to_string(),
+            timestamp: "2026-01-01T00:00:00Z".to_string(),
+            is_first_session: Some(true),
+            context: Some(DeviceContext {
+                app_version: None,
+                os_name: Some("Linux".to_string()),
+                os_version: Some("6.1".to_string()),
+                device_model: Some("Framework Laptop".to_string()),
+                locale: Some("en_US".to_string()),
+                timezone: Some("UTC".to_string()),
+                screen_width: None,
+                screen_height: None,
+            }),
+            idfa: None,
+            gaid: None,
+            fbp: None,
+            fbc: None,
+            email_sha256: None,
+            phone_sha256: None,
+            external_id_sha256: None,
+            att_status: None,
+        };
+
+        let value = serde_json::to_value(&request).unwrap();
+        assert_eq!(value["context"]["os_name"], json!("Linux"));
+        assert_eq!(value["context"]["os_version"], json!("6.1"));
+        assert_eq!(value["context"]["device_model"], json!("Framework Laptop"));
+        assert!(value["context"].get("screen_width").is_none());
+    }
 
     #[test]
     fn test_should_retry() {
